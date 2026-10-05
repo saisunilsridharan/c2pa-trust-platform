@@ -1,3 +1,4 @@
+import TimestampsPanel from "./TimestampsPanel";
 import TrustPolicyPanel from "./TrustPolicyPanel";
 import HardwareIdentitiesPanel from "./HardwareIdentitiesPanel";
 import SigningChoicesPanel from "./SigningChoicesPanel";
@@ -475,6 +476,7 @@ function App() {
                   <StorageProvidersPanel token={token} />
                   <WebhooksPanel token={token} />
                   <ProcessingPanel token={token} />
+                  <TimestampsPanel token={token} />
                   <TrustPolicyPanel token={token} />
                   <HardwareIdentitiesPanel
                     token={token}

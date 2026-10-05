@@ -1,3 +1,4 @@
+import { TimestampStatus } from "./TimestampsPanel";
 import { TrustPolicyStatus } from "./TrustPolicyPanel";
 import {
   SigningChoiceSelector,
@@ -55,14 +56,16 @@ export default function SigningPanel({
     <section>
       <h2>Sign content</h2>
       <TrustPolicyStatus token={token} />
+      <TimestampStatus token={token} />
       <SigningChoiceSelector
         token={token}
         value={choice}
         onChange={setChoice}
       />
       <div className="notice">
-        Public trust has not been verified for the active identity. There is no
-        trusted timestamp. Your declarations will be embedded publicly.
+        Public trust has not been verified for the active identity. Private
+        timestamping depends on the active provider policy. Your declarations
+        will be embedded publicly.
       </div>
       {!canConfigure && !available && (
         <p>An administrator must configure the signing identity.</p>

@@ -19,8 +19,8 @@ public class JobService {
  private final Path storage=Path.of(".local/assets").toAbsolutePath();
  private final StorageVersionRepository storageVersions;private final PrivateObjectStorage objects;
  private final JobCompletion completion;
- private final TrustPolicy trust;private final WorkerExecution execution;private final SigningChoices choices;private final JobLeases leases;private final ProcessingRepository processing;
- public JobService(JobRepository jobs,ConfigurationRepository configs,DevelopmentIdentity identity,ObjectMapper mapper,AuditService audit,StorageRepository retention,StorageVersionRepository storageVersions,PrivateObjectStorage objects,JobCompletion completion,JobLeases leases,ProcessingRepository processing,SigningChoices choices,WorkerExecution execution,TrustPolicy trust){this.trust=trust;this.execution=execution;this.choices=choices;this.jobs=jobs;this.configs=configs;this.identity=identity;this.mapper=mapper;this.audit=audit;this.retention=retention;this.storageVersions=storageVersions;this.objects=objects;this.completion=completion;this.leases=leases;this.processing=processing;}
+ private final PrivateTimestamps timestamps;private final TrustPolicy trust;private final WorkerExecution execution;private final SigningChoices choices;private final JobLeases leases;private final ProcessingRepository processing;
+ public JobService(JobRepository jobs,ConfigurationRepository configs,DevelopmentIdentity identity,ObjectMapper mapper,AuditService audit,StorageRepository retention,StorageVersionRepository storageVersions,PrivateObjectStorage objects,JobCompletion completion,JobLeases leases,ProcessingRepository processing,SigningChoices choices,WorkerExecution execution,TrustPolicy trust,PrivateTimestamps timestamps){this.timestamps=timestamps;this.trust=trust;this.execution=execution;this.choices=choices;this.jobs=jobs;this.configs=configs;this.identity=identity;this.mapper=mapper;this.audit=audit;this.retention=retention;this.storageVersions=storageVersions;this.objects=objects;this.completion=completion;this.leases=leases;this.processing=processing;}
  public Path directory(String id){UUID.fromString(id);return storage.resolve(id);}
  public synchronized SigningJob submit(MultipartFile file,String creator,String title,String ai,String owner,String requestId,Long expectedProfileRevision,String expectedIdentityFingerprint) throws Exception {
   return submit(file,creator,title,ai,owner,requestId,expectedProfileRevision,expectedIdentityFingerprint,null,null);
@@ -43,12 +43,13 @@ public class JobService {
   Files.createDirectories(storage);Files.setPosixFilePermissions(storage,java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
   Path directory=directory(job.id);Files.createDirectory(directory,java.nio.file.attribute.PosixFilePermissions.asFileAttribute(java.nio.file.attribute.PosixFilePermissions.fromString("rwx------")));
   try {
-   job.trustSnapshot=trust.snapshot(job.workspaceId);
+   job.trustSnapshot=trust.snapshot(job.workspaceId);job.timestampSnapshot=timestamps.snapshot(job.workspaceId);
    processing.findById(job.workspaceId).ifPresent(p->{job.workerTimeoutSeconds=p.workerTimeoutSeconds;job.maxAttempts=p.maxAttempts;});
    var activeStorage=retention.findById(job.workspaceId).map(s->s.activeVersion).orElse(null);
    if(activeStorage!=null)job.storageSnapshot=storageVersions.findById(activeStorage).filter(v->v.workspaceId.equals(job.workspaceId)).orElseThrow().configuration;
    file.transferTo(directory.resolve("original"+extension(job)));
    var data=new LinkedHashMap<String,Object>(Map.of("creator",creator,"organization",settings.organizationName(),"profile",settings.profileName(),"configurationRevision",selected.profileRevision(),"aiDisclosure",ai,"source","user-declared","developmentIdentity",material.development()));
+   if(job.timestampSnapshot!=null)data.put("privateTimestampVersion",mapper.readTree(job.timestampSnapshot).path("versionId").asText());
    if(job.trustSnapshot!=null)data.put("privateTrustPolicyVersion",mapper.readTree(job.trustSnapshot).path("versionId").asText());
    if(selected.optionId()!=null){data.put("signingChoiceId",selected.optionId());data.put("signingChoiceRevision",selected.optionRevision());}
    Files.writeString(directory.resolve("manifest.json"),mapper.writeValueAsString(Map.of("claim_generator_info",List.of(Map.of("name","C2PA Trust Portal","version","0.3.0")),"title",title,"format",format,"assertions",List.of(Map.of("label","com.c2pa.portal.declarations","data",data)))));
@@ -64,7 +65,7 @@ public class JobService {
   try {
    Files.createDirectories(directory);Path output=directory.resolve("signed"+extension(job));
    Path worker=Path.of("../c2pa-worker/target/debug/c2pa-worker").toAbsolutePath().normalize();
-   int exit=execution.sign(job.workspaceId,worker,source.resolve("original"+extension(job)),output,source.resolve("manifest.json"),Path.of(job.certificatePath),job.keyPath,directory.resolve("report.json"),directory.resolve("worker-error.log"),job.workerTimeoutSeconds,job.trustSnapshot);
+   int exit=execution.sign(job.workspaceId,worker,source.resolve("original"+extension(job)),output,source.resolve("manifest.json"),Path.of(job.certificatePath),job.keyPath,directory.resolve("report.json"),directory.resolve("worker-error.log"),job.workerTimeoutSeconds,job.trustSnapshot,job.timestampSnapshot);
    if(exit!=0 || !Files.isRegularFile(output))throw new IllegalStateException("Content or certificate could not be signed");
    objects.write(job,"signed"+extension(job),output);objects.write(job,"report.json",directory.resolve("report.json"));
    job.state="COMPLETED";job.error=null;

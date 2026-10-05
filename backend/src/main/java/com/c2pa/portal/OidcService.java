@@ -30,7 +30,7 @@ import java.util.*;
  private JsonNode exchange(Configuration c,URI endpoint,String form)throws Exception {
   var builder=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).followRedirects(HttpClient.Redirect.NEVER);var trust=PrivateObjectStorage.trust(c.trustedCaPem());if(trust!=null){var ssl=javax.net.ssl.SSLContext.getInstance("TLS");ssl.init(null,trust,null);builder.sslContext(ssl);}
   try(var client=builder.build()){
-   var request=HttpRequest.newBuilder(endpoint).timeout(Duration.ofSeconds(15)).header("Accept","application/json");if(form==null)request.GET();else request.header("Content-Type","application/x-www-form-urlencoded").POST(HttpRequest.BodyPublishers.ofString(form));var response=client.send(request.build(),HttpResponse.BodyHandlers.ofInputStream());try(var body=response.body()){if(response.statusCode()!=200)throw new IllegalStateException();byte[] bytes=body.readNBytes(65537);if(bytes.length>65536)throw new IllegalStateException();return mapper.readTree(bytes);}
+   var request=HttpRequest.newBuilder(endpoint).timeout(Duration.ofSeconds(15)).header("Accept","application/json");if(form==null)request.GET();else request.header("Content-Type","application/x-www-form-urlencoded").POST(HttpRequest.BodyPublishers.ofString(form));var response=client.send(request.build(),info->new BoundedHttpBody(65536));if(response.statusCode()!=200)throw new IllegalStateException();return mapper.readTree(response.body());
   }
  }
  public Discovery discover(Configuration configuration)throws Exception {

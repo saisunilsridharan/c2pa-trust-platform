@@ -15,10 +15,10 @@ import java.util.concurrent.TimeUnit;
 @RequestMapping("/api/v1/verification")
 @SecurityRequirement(name="adminToken")
 public class VerificationController {
- private final TrustPolicy trust;private final ConfigurationRepository repository;
+ private final PrivateTimestamps timestamps;private final TrustPolicy trust;private final ConfigurationRepository repository;
  private final ObjectMapper mapper;
  private final AuditService audit;
- public VerificationController(ConfigurationRepository repository,ObjectMapper mapper,AuditService audit,TrustPolicy trust) {
+ public VerificationController(ConfigurationRepository repository,ObjectMapper mapper,AuditService audit,TrustPolicy trust,PrivateTimestamps timestamps) {this.timestamps=timestamps;
   this.trust=trust;
   this.repository=repository; this.mapper=mapper;this.audit=audit;
  }
@@ -40,7 +40,7 @@ public class VerificationController {
    Path input=directory.resolve("asset"+ContentFormats.extension(format));
    file.transferTo(input);
    Path output=directory.resolve("report.json");
-   String snapshot=trust.snapshot(WorkspaceContext.id());var command=new java.util.ArrayList<String>();if(snapshot==null)command.addAll(java.util.List.of(worker.toString(),input.toString()));else{Path policy=directory.resolve("trust-policy.json");Files.writeString(policy,trust.workerConfiguration(snapshot));command.addAll(java.util.List.of(worker.toString(),"inspect",input.toString(),policy.toString()));}
+   String snapshot=trust.snapshot(WorkspaceContext.id()),timestampSnapshot=timestamps.snapshot(WorkspaceContext.id());var command=new java.util.ArrayList<String>();if(snapshot==null && timestampSnapshot==null)command.addAll(java.util.List.of(worker.toString(),input.toString()));else{Path policy=directory.resolve("trust-policy.json");Files.writeString(policy,trust.workerConfiguration(snapshot,timestampSnapshot));command.addAll(java.util.List.of(worker.toString(),"inspect",input.toString(),policy.toString()));}
    process=new ProcessBuilder(command)
     .redirectOutput(output.toFile()).redirectError(directory.resolve("error.log").toFile()).start();
    if(!process.waitFor(30,TimeUnit.SECONDS)) throw new ResponseStatusException(HttpStatus.GATEWAY_TIMEOUT,"Inspection timed out");

@@ -26,9 +26,13 @@ import java.util.*;
   var id=settings.findById(workspace).map(s->s.activeVersion).orElse(null);if(id==null)return null;
   var v=versions.findById(id).filter(x->x.workspaceId.equals(workspace)).orElseThrow();return mapper.writeValueAsString(new Snapshot(v.id,decode(v.configuration)));
  }
- public String workerConfiguration(String snapshot)throws Exception{
-  if(snapshot==null)return null;var s=mapper.readValue(snapshot,Snapshot.class);var c=s.configuration();List<Object> anchors=new ArrayList<>();
+ public String workerConfiguration(String snapshot)throws Exception{return workerConfiguration(snapshot,null);}
+ public String workerConfiguration(String snapshot,String timestampSnapshot)throws Exception{
+  if(snapshot==null && timestampSnapshot==null)return null;
+  var s=snapshot==null?null:mapper.readValue(snapshot,Snapshot.class);var c=s==null?new Configuration("",false):s.configuration();List<Object> anchors=new ArrayList<>();
   if(c.privateAnchorsPem()!=null && !c.privateAnchorsPem().isBlank())anchors.add(Map.of("trust_anchors",c.privateAnchorsPem(),"trust_kind","manifest","trust_uri","urn:c2pa-portal:private-policy:"+s.versionId()));
-  return mapper.writeValueAsString(Map.of("versionId",s.versionId(),"source","PRIVATE_WORKSPACE_POLICY","requireTrusted",c.requireTrustedSigning(),"settings",Map.of("trust",Map.of("anchors",anchors),"verify",Map.of("verify_trust",true,"ocsp_fetch",false,"remote_manifest_fetch",false),"core",Map.of("allowed_network_hosts",List.of(),"allow_redirects",false))));
+  var timestamp=timestampSnapshot==null?null:mapper.readValue(timestampSnapshot,PrivateTimestamps.Snapshot.class);
+  if(timestamp!=null)anchors.add(Map.of("trust_anchors",timestamp.configuration().tsaAnchorsPem(),"trust_kind","tsa","trust_uri","urn:c2pa-portal:private-tsa:"+timestamp.versionId()));
+  return mapper.writeValueAsString(Map.of("versionId",s==null?"SDK_DEFAULT":s.versionId(),"source",s==null?"PRIVATE_TIMESTAMP_POLICY":"PRIVATE_WORKSPACE_POLICY","requireTrusted",c.requireTrustedSigning(),"requireTimestamp",timestamp!=null,"timestampVersionId",timestamp==null?"":timestamp.versionId(),"settings",Map.of("trust",Map.of("anchors",anchors),"verify",Map.of("verify_trust",true,"ocsp_fetch",false,"remote_manifest_fetch",false),"core",Map.of("allowed_network_hosts",List.of(),"allow_redirects",false))));
  }
 }

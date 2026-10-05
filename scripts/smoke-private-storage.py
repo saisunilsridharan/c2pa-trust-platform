@@ -27,6 +27,9 @@ ACCESS, SECRET = secrets.token_hex(16), secrets.token_hex(32)
 OBJECTS = {}
 WEBHOOK_SECRET = secrets.token_hex(32)
 EVENTS = {}
+TSA_SECRET = secrets.token_hex(32)
+TSA_MODE = "valid"
+TSA_LOCK = threading.Lock()
 
 def digest(value):
     return hashlib.sha256(value).hexdigest()
@@ -98,6 +101,66 @@ class S3(http.server.BaseHTTPRequestHandler):
 
     do_PUT = do_GET = do_DELETE = handle_object
 
+def timestamp_fixture(folder):
+    folder.mkdir(mode=0o700)
+    def openssl(*args):
+        subprocess.run(['openssl', *args], cwd=folder, capture_output=True, check=True, timeout=15)
+    openssl('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', 'root.key', '-out', 'root.pem',
+            '-days', '3', '-subj', '/CN=Disposable Timestamp Root', '-addext', 'basicConstraints=critical,CA:TRUE',
+            '-addext', 'keyUsage=critical,keyCertSign,cRLSign')
+    openssl('req', '-new', '-newkey', 'rsa:2048', '-nodes', '-keyout', 'signer.key', '-out', 'request.pem',
+            '-subj', '/CN=Disposable Timestamp Signer')
+    (folder / 'extensions').write_text('basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=critical,timeStamping\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n')
+    openssl('x509', '-req', '-in', 'request.pem', '-CA', 'root.pem', '-CAkey', 'root.key', '-CAcreateserial',
+            '-out', 'signer.pem', '-days', '2', '-sha256', '-extfile', 'extensions')
+    for name in ['root.key', 'signer.key']: (folder / name).chmod(0o600)
+    (folder / 'serial').write_text('01\n')
+    config = folder / 'tsa.conf'
+    config.write_text(f'[tsa]\ndefault_tsa=portal\n[portal]\nserial={folder / "serial"}\ncrypto_device=builtin\nsigner_cert={folder / "signer.pem"}\ncerts={folder / "root.pem"}\nsigner_key={folder / "signer.key"}\nsigner_digest=sha256\ndefault_policy=1.2.3.4.1\nother_policies=1.2.3.4.2\ndigests=sha256,sha384,sha512\naccuracy=secs:1\nordering=yes\ntsa_name=yes\ness_cert_id_chain=yes\ness_cert_id_alg=sha256\n')
+    class TSA(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_): pass
+        def do_POST(self):
+            if not hmac.compare_digest(self.headers.get('Authorization', ''), 'Bearer ' + TSA_SECRET):
+                self.send_response(403); self.end_headers(); return
+            size = int(self.headers.get('Content-Length', '0'))
+            if size < 1 or size > 65536:
+                self.send_response(400); self.end_headers(); return
+            body = self.rfile.read(size)
+            with TSA_LOCK:
+                if TSA_MODE in ['wrong_nonce', 'wrong_imprint']:
+                    altered = bytearray(body)
+                    def tlv(offset):
+                        tag = altered[offset]; position = offset + 1; length = altered[position]; position += 1
+                        if length & 128:
+                            count = length & 127; length = int.from_bytes(altered[position:position + count], 'big'); position += count
+                        return tag, position, position + length
+                    _, position, end = tlv(0)
+                    elements = []
+                    while position < end:
+                        element = tlv(position); elements.append(element); position = element[2]
+                    if TSA_MODE == 'wrong_nonce':
+                        nonce = next(e for e in elements[1:] if e[0] == 2); altered[nonce[2] - 1] ^= 1
+                    else:
+                        _, position, _ = elements[1]; algorithm = tlv(position); hashed = tlv(algorithm[2]); altered[hashed[1]] ^= 1
+                    body = bytes(altered)
+                (folder / 'query.der').write_bytes(body)
+                result = subprocess.run(['openssl', 'ts', '-reply', '-config', str(config),
+                    '-queryfile', str(folder / 'query.der'), '-out', str(folder / 'reply.der')], capture_output=True, timeout=15)
+                if result.returncode:
+                    self.send_response(500); self.end_headers(); return
+                response = (folder / 'reply.der').read_bytes()
+            if TSA_MODE == 'invalid': response = b'invalid-timestamp'
+            if TSA_MODE == 'oversize': response = b'0' * 65537
+            if TSA_MODE == 'redirect':
+                self.send_response(302); self.send_header('Location', '/elsewhere'); self.end_headers(); return
+            self.send_response(200); self.send_header('Content-Type', 'application/timestamp-reply')
+            self.send_header('Content-Length', str(len(response))); self.end_headers()
+            try: self.wfile.write(response)
+            except (BrokenPipeError, ConnectionResetError): pass
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), TSA)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, (folder / 'root.pem').read_text()
+
 def initialize_token(command, environment, so_pin, user_pin):
     # The utility requires a controlling terminal. Feed each prompt without exposing PINs in argv.
     process = subprocess.Popen(['script', '-q', '-e', '-c', shlex.join(command), '/dev/null'],
@@ -120,7 +183,8 @@ def initialize_token(command, environment, so_pin, user_pin):
 def chunk(kind, data):
     return struct.pack('!I', len(data)) + kind + data + struct.pack('!I', zlib.crc32(kind + data))
 
-def run(postgres_bin=None, softhsm_dir=None):
+def run(postgres_bin=None, softhsm_dir=None, timestamps=False):
+    global TSA_MODE
     assert (ROOT / 'backend/target/portal-api-0.1.0.jar').is_file(), 'Build the Java API first'
     assert (ROOT / 'c2pa-worker/target/debug/c2pa-worker').is_file(), 'Build the Rust worker first'
     with tempfile.TemporaryDirectory(prefix='c2pa-private-storage-') as temporary:
@@ -131,6 +195,7 @@ def run(postgres_bin=None, softhsm_dir=None):
         base = f'http://127.0.0.1:{port}/api/v1'
         fixture = http.server.ThreadingHTTPServer(('127.0.0.1', 0), S3)
         threading.Thread(target=fixture.serve_forever, daemon=True).start()
+        tsa_server, tsa_anchor = timestamp_fixture(sandbox / "tsa") if timestamps else (None, None)
         application = None
         log = (sandbox / 'application.log').open('wb')
         token = ''
@@ -333,6 +398,35 @@ def run(postgres_bin=None, softhsm_dir=None):
                 'versionId': policy_id, 'acknowledgePrivatePolicy': True}, workspace=workspace), 404)
             trust_state = call('/admin/trust-policy/activate', trust_selection)
             assert call('/portal/trust-policy')['requireTrustedSigning']
+            if timestamps:
+                tsa_credential = call('/admin/credentials', {'label': 'Disposable TSA bearer credential', 'value': TSA_SECRET})['id']
+                timestamp_state = call('/admin/timestamps')
+                timestamp_state = call('/admin/timestamps/draft', {'revision': timestamp_state['revision'], 'configuration': {
+                    'enabled': True, 'endpoint': f'http://127.0.0.1:{tsa_server.server_port}/timestamp',
+                    'bearerCredential': tsa_credential, 'tlsCaPem': '', 'tsaAnchorsPem': tsa_anchor, 'allowLoopbackHttp': True}}, method='PUT')
+                timestamp_id = timestamp_state['draft']['id']
+                timestamp_selection = {'revision': timestamp_state['revision'], 'versionId': timestamp_id, 'acknowledgePrivateTimestamp': True}
+                timestamp_test = {'revision': timestamp_state['revision'], 'versionId': timestamp_id,
+                    'signingOptionId': choice['id'], 'signingOptionRevision': choice['revision']}
+                denied(lambda: call('/admin/timestamps/activate', timestamp_selection), 409)
+                for mode in ['invalid', 'oversize', 'redirect', 'wrong_nonce', 'wrong_imprint']:
+                    TSA_MODE = mode
+                    denied(lambda: call('/admin/timestamps/test', timestamp_test), 502)
+                    assert call('/admin/timestamps')['draft']['testedAt'] is None
+                TSA_MODE = 'valid'
+                timestamp_state = call('/admin/timestamps/draft', {'revision': timestamp_state['revision'], 'configuration': {
+                    'enabled': True, 'endpoint': f'http://127.0.0.1:{tsa_server.server_port}/timestamp',
+                    'bearerCredential': tsa_credential, 'tlsCaPem': '', 'tsaAnchorsPem': original_anchor, 'allowLoopbackHttp': True}}, method='PUT')
+                denied(lambda: call('/admin/timestamps/test', {'revision': timestamp_state['revision'],
+                    'versionId': timestamp_state['draft']['id'], 'signingOptionId': choice['id'],
+                    'signingOptionRevision': choice['revision']}), 502)
+                timestamp_test['revision'] = timestamp_state['revision']
+                timestamp_selection['revision'] = timestamp_state['revision']
+                call('/admin/timestamps/test', timestamp_test)
+                denied(lambda: call('/admin/timestamps/activate', {'revision': call('/admin/timestamps', workspace=workspace)['revision'],
+                    'versionId': timestamp_id, 'acknowledgePrivateTimestamp': True}, workspace=workspace), 404)
+                timestamp_state = call('/admin/timestamps/activate', timestamp_selection)
+                assert call('/portal/timestamps')['enabled']
             session = token
             api_key = call('/auth/api-keys', {'label': 'Isolated worker integration', 'scopes': ['READ', 'SIGN', 'VERIFY'], 'days': 1})
             token = api_key['token']
@@ -349,6 +443,12 @@ def run(postgres_bin=None, softhsm_dir=None):
                 'expectedIdentityFingerprint': second_choice['fingerprint']}, 'sample.png', png)
             denied(lambda: call('/jobs', data=changed_data, extra={**changed_headers, 'Idempotency-Key': request_key}), 409)
             token = session
+            if timestamps:
+                timestamp_state = call('/admin/timestamps/draft', {'revision': timestamp_state['revision'], 'configuration': {'enabled': False}}, method='PUT')
+                disabled_timestamp = {'revision': timestamp_state['revision'], 'versionId': timestamp_state['draft']['id'], 'acknowledgePrivateTimestamp': True}
+                call('/admin/timestamps/test', disabled_timestamp)
+                call('/admin/timestamps/activate', disabled_timestamp)
+                assert not call('/portal/timestamps')['enabled']
             # Later policy activation must not alter the job's captured strict policy.
             trust_state = call('/admin/trust-policy/draft', {'revision': trust_state['revision'],
                 'configuration': {'privateAnchorsPem': '', 'requireTrustedSigning': False}}, method='PUT')
@@ -372,6 +472,9 @@ def run(postgres_bin=None, softhsm_dir=None):
             assert report['validation_state'] == 'Trusted'
             assert report['portal_trust_policy']['versionId'] == policy_id
             assert not report['portal_trust_policy']['publicTrustVerified']
+            if timestamps:
+                assert report['portal_trust_policy']['timestampVersionId'] == timestamp_id
+                assert report['portal_trust_policy']['privateTimestampTrusted']
             assert choice['id'] in json.dumps(report)
             assert 'New default organization' not in json.dumps(report)
             signed = call(f'/jobs/{job["id"]}/download', raw=True)
@@ -433,9 +536,10 @@ def run(postgres_bin=None, softhsm_dir=None):
             data, headers = multipart({'password': backup_password, 'acknowledgeRestore': 'true'}, 'key.backup', backup)
             assert call('/admin/security/restore', data=data, extra=headers)['available']
             assert call(f'/jobs/{job["id"]}/download', raw=True) == signed
-            print(('PostgreSQL' if postgres_bin else 'H2') + (': PKCS#11/non-exportable SoftHSM signing, ' if softhsm_dir else ': ') + 'private trust policy/snapshots, approved signing choices/rotation/withdrawal, MFA, one-time account recovery, migrations, leased native C2PA job, private storage, SigV4, scoped API-key signing/revocation, provider snapshots, notifications, HMAC webhooks, audit checkpoint, workspace isolation, restart persistence and encryption-key recovery passed.')
+            print(('PostgreSQL' if postgres_bin else 'H2') + (': PKCS#11/non-exportable SoftHSM signing, ' if softhsm_dir else ': ') + ('RFC 3161 timestamps/snapshots, ' if timestamps else '') + 'private trust policy/snapshots, approved signing choices/rotation/withdrawal, MFA, one-time account recovery, migrations, leased native C2PA job, private storage, SigV4, scoped API-key signing/revocation, provider snapshots, notifications, HMAC webhooks, audit checkpoint, workspace isolation, restart persistence and encryption-key recovery passed.')
         finally:
             stop(); fixture.shutdown(); fixture.server_close()
+            if tsa_server is not None: tsa_server.shutdown(); tsa_server.server_close()
             if postgres is not None:
                 postgres.terminate(); postgres.wait(15)
             log.close()
@@ -445,5 +549,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--postgres-bin', help='Directory containing initdb and postgres; creates a private temporary cluster')
     parser.add_argument('--softhsm-dir', help='Extracted SoftHSM/OpenSC prefix; uses only a disposable private test token')
+    parser.add_argument('--timestamps', action='store_true', help='Test real RFC 3161 OpenSSL timestamps against a private disposable TSA')
     args = parser.parse_args()
-    run(args.postgres_bin, args.softhsm_dir)
+    run(args.postgres_bin, args.softhsm_dir, args.timestamps)

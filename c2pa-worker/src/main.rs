@@ -11,7 +11,7 @@ fn execute() -> Result<(), Box<dyn std::error::Error>> {
         args.first().map(String::as_str),
         Some("sign" | "sign-pkcs11")
     ) {
-        if args.len() != 6 && args.len() != 7 {
+        if args.len() != 6 && args.len() != 7 && args.len() != 8 {
             return Err("Usage: sign <input> <output> <manifest> <certificate-chain> <key>".into());
         }
         let definition = std::fs::read_to_string(&args[3])?;
@@ -40,7 +40,7 @@ fn execute() -> Result<(), Box<dyn std::error::Error>> {
             format,
             &mut original,
         )?;
-        let signer: Box<dyn c2pa::Signer + Send + Sync> = if args[0] == "sign-pkcs11" {
+        let mut signer: Box<dyn c2pa::Signer + Send + Sync> = if args[0] == "sign-pkcs11" {
             let socket = args[5].clone();
             Box::new(c2pa::CallbackSigner::new(
                 move |_, data| {
@@ -52,6 +52,7 @@ fn execute() -> Result<(), Box<dyn std::error::Error>> {
                         let mut stream = std::os::unix::net::UnixStream::connect(&socket)?;
                         stream.set_read_timeout(Some(std::time::Duration::from_secs(25)))?;
                         stream.set_write_timeout(Some(std::time::Duration::from_secs(5)))?;
+                        stream.write_all(&[1u8])?;
                         stream.write_all(&(data.len() as u32).to_be_bytes())?;
                         stream.write_all(data)?;
                         let mut length = [0u8; 4];
@@ -72,6 +73,15 @@ fn execute() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             c2pa::create_signer::from_files(&args[4], &args[5], c2pa::SigningAlg::Es256, None)?
         };
+        if policy
+            .as_ref()
+            .is_some_and(|p| p["requireTimestamp"] == true)
+        {
+            signer = Box::new(TimestampSigner {
+                inner: signer,
+                socket: args.get(7).ok_or("Missing timestamp bridge")?.clone(),
+            });
+        }
         builder.sign_file(signer.as_ref(), &args[1], &args[2])?;
         let reader =
             c2pa::Reader::from_context(build_context(args.get(6))?.0).with_file(&args[2])?;
@@ -81,6 +91,14 @@ fn execute() -> Result<(), Box<dyn std::error::Error>> {
         {
             std::fs::remove_file(&args[2])?;
             return Err("Signed output failed validation".into());
+        }
+        if policy
+            .as_ref()
+            .is_some_and(|p| p["requireTimestamp"] == true)
+            && !timestamp_trusted(&reader)?
+        {
+            std::fs::remove_file(&args[2])?;
+            return Err("Output has no trusted private timestamp".into());
         }
         report(&reader, policy)?;
     } else {
@@ -117,8 +135,62 @@ fn report(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut result: serde_json::Value = serde_json::from_str(&reader.json())?;
     if let Some(policy) = policy {
-        result["portal_trust_policy"] = serde_json::json!({"versionId":policy["versionId"],"source":policy["source"],"requireTrustedSigning":policy["requireTrusted"],"publicTrustVerified":false});
+        result["portal_trust_policy"] = serde_json::json!({"versionId":policy["versionId"],"source":policy["source"],"requireTrustedSigning":policy["requireTrusted"],"publicTrustVerified":false,"timestampVersionId":policy["timestampVersionId"],"privateTimestampRequired":policy["requireTimestamp"],"privateTimestampTrusted":timestamp_trusted(reader)?});
     }
     println!("{result}");
     Ok(())
+}
+
+fn timestamp_trusted(reader: &c2pa::Reader) -> Result<bool, Box<dyn std::error::Error>> {
+    let report: serde_json::Value = serde_json::from_str(&reader.json())?;
+    Ok(report["validation_results"]["activeManifest"]["success"]
+        .as_array()
+        .is_some_and(|codes| codes.iter().any(|c| c["code"] == "timeStamp.trusted")))
+}
+struct TimestampSigner {
+    inner: Box<dyn c2pa::Signer + Send + Sync>,
+    socket: String,
+}
+impl c2pa::Signer for TimestampSigner {
+    fn sign(&self, data: &[u8]) -> c2pa::Result<Vec<u8>> {
+        self.inner.sign(data)
+    }
+    fn alg(&self) -> c2pa::SigningAlg {
+        self.inner.alg()
+    }
+    fn certs(&self) -> c2pa::Result<Vec<Vec<u8>>> {
+        self.inner.certs()
+    }
+    fn reserve_size(&self) -> usize {
+        self.inner.reserve_size() + 20000
+    }
+    fn time_authority_url(&self) -> Option<String> {
+        Some("urn:c2pa-portal:private-tsa".into())
+    }
+    fn send_timestamp_request(&self, message: &[u8]) -> Option<c2pa::Result<Vec<u8>>> {
+        Some(self.inner.timestamp_request_body(message).and_then(|body| {
+            use std::io::{Read, Write};
+            let exchange = || -> std::io::Result<Vec<u8>> {
+                if body.len() > 65536 {
+                    return Err(std::io::Error::other("Timestamp request too large"));
+                }
+                let mut stream = std::os::unix::net::UnixStream::connect(&self.socket)?;
+                stream.set_read_timeout(Some(std::time::Duration::from_secs(25)))?;
+                stream.set_write_timeout(Some(std::time::Duration::from_secs(5)))?;
+                stream.write_all(&[2u8])?;
+                stream.write_all(&(body.len() as u32).to_be_bytes())?;
+                stream.write_all(&body)?;
+                let mut length = [0u8; 4];
+                stream.read_exact(&mut length)?;
+                let length = u32::from_be_bytes(length) as usize;
+                if length == 0 || length > 65536 {
+                    return Err(std::io::Error::other("Invalid timestamp response size"));
+                }
+                let mut response = vec![0; length];
+                stream.read_exact(&mut response)?;
+                Ok(response)
+            };
+            exchange().map_err(c2pa::Error::IoError)
+        }))
+    }
 }

@@ -1,3 +1,4 @@
+import { TimestampStatus } from "./TimestampsPanel";
 import { TrustPolicyStatus } from "./TrustPolicyPanel";
 import {
   SigningChoiceSelector,
@@ -128,6 +129,7 @@ export default function JobsPanel({
     <section>
       <h2>Saved assets & signing jobs</h2>
       <TrustPolicyStatus token={token} />
+      <TimestampStatus token={token} />
       {admin && operations && (
         <p>
           Queue: {String(operations.queued)} waiting ·{" "}

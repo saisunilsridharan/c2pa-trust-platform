@@ -102,7 +102,7 @@ export function SigningChoiceSelector({
             : value.provider === "PKCS11"
               ? "PKCS#11 token; public trust unverified."
               : "Private certificate; public trust unverified."}{" "}
-          No trusted timestamp.
+          Timestamping follows the active workspace provider policy.
         </p>
       )}
       <p role="status">{message}</p>
