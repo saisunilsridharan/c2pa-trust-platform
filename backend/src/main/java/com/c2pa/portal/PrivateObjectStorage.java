@@ -27,7 +27,7 @@ public class PrivateObjectStorage {
   for(String id:List.of(Objects.requireNonNullElse(settings.accessKeyCredential(),""),Objects.requireNonNullElse(settings.secretKeyCredential(),""))){byte[] secret=credentials.read(workspace,id);Arrays.fill(secret,(byte)0);}
   return settings;
  }
- private javax.net.ssl.TrustManager[] trust(String pem)throws Exception {
+ public static javax.net.ssl.TrustManager[] trust(String pem)throws Exception {
   if(pem==null || pem.isBlank())return null;
   var certificates=java.security.cert.CertificateFactory.getInstance("X.509").generateCertificates(new java.io.ByteArrayInputStream(pem.getBytes(StandardCharsets.US_ASCII)));
   if(certificates.isEmpty())throw new IllegalArgumentException("Empty CA bundle");

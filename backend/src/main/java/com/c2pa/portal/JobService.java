@@ -18,7 +18,8 @@ public class JobService {
  private final JobRepository jobs;private final ConfigurationRepository configs;private final DevelopmentIdentity identity;private final ObjectMapper mapper;private final AuditRepository audit;private final StorageRepository retention;
  private final Path storage=Path.of(".local/assets").toAbsolutePath();
  private final StorageVersionRepository storageVersions;private final PrivateObjectStorage objects;
- public JobService(JobRepository jobs,ConfigurationRepository configs,DevelopmentIdentity identity,ObjectMapper mapper,AuditRepository audit,StorageRepository retention,StorageVersionRepository storageVersions,PrivateObjectStorage objects){this.jobs=jobs;this.configs=configs;this.identity=identity;this.mapper=mapper;this.audit=audit;this.retention=retention;this.storageVersions=storageVersions;this.objects=objects;}
+ private final JobCompletion completion;
+ public JobService(JobRepository jobs,ConfigurationRepository configs,DevelopmentIdentity identity,ObjectMapper mapper,AuditRepository audit,StorageRepository retention,StorageVersionRepository storageVersions,PrivateObjectStorage objects,JobCompletion completion){this.jobs=jobs;this.configs=configs;this.identity=identity;this.mapper=mapper;this.audit=audit;this.retention=retention;this.storageVersions=storageVersions;this.objects=objects;this.completion=completion;}
  public Path directory(String id){UUID.fromString(id);return storage.resolve(id);}
  public synchronized SigningJob submit(MultipartFile file,String creator,String title,String ai,String owner,String requestId,Long expectedProfileRevision,String expectedIdentityFingerprint) throws Exception {
   if(creator.isBlank() || creator.length()>120 || title.isBlank() || title.length()>200 || !Set.of("none","generated","edited","unspecified").contains(ai))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid public claims");
@@ -63,8 +64,7 @@ public class JobService {
   } catch(Exception e){job.state="FAILED";job.error="Signing failed. Check content, worker readiness and certificate validity.";}
   finally {
    if(process!=null && process.isAlive()){process.destroyForcibly();try{process.waitFor(5,TimeUnit.SECONDS);}catch(InterruptedException e){Thread.currentThread().interrupt();}}
-   job.completedAt=Instant.now();jobs.saveAndFlush(job);
-   AuditEvent event=new AuditEvent();event.createdAt=Instant.now();event.actor=job.owner;event.workspaceId=job.workspaceId;event.action="SIGNING_JOB_"+job.state;event.reference=job.id;audit.save(event);
+   job.completedAt=Instant.now();completion.finish(job);
   }
  }
  @Scheduled(cron="${portal.jobs.cleanup.schedule:0 0 * * * *}") public void cleanup() throws Exception {

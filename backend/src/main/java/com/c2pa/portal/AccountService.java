@@ -13,7 +13,8 @@ public class AccountService {
  private final UserRepository users; private final SessionRepository sessions;private final MembershipRepository memberships;
  private final BCryptPasswordEncoder encoder=new BCryptPasswordEncoder(12);
  private final String dummy=encoder.encode("unused-account-password");
- public AccountService(UserRepository users,SessionRepository sessions,MembershipRepository memberships){this.users=users;this.sessions=sessions;this.memberships=memberships;}
+ private final ApiKeyRepository apiKeys;
+ public AccountService(UserRepository users,SessionRepository sessions,MembershipRepository memberships,ApiKeyRepository apiKeys){this.users=users;this.sessions=sessions;this.memberships=memberships;this.apiKeys=apiKeys;}
  public record Profile(Long id,String username,String role,boolean enabled,boolean passwordChangeRequired){}
  public record Login(String token,Instant expiresAt,Profile user){}
  public static String hash(String token){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8)));}catch(Exception e){throw new IllegalStateException(e);}}
@@ -51,12 +52,12 @@ public class AccountService {
   var user=users.lockById(userId).orElseThrow();
   if(currentPassword==null || currentPassword.getBytes(StandardCharsets.UTF_8).length>72 || !encoder.matches(currentPassword,user.passwordHash))return false;
   if(encoder.matches(newPassword,user.passwordHash))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Choose a different password");
-  user.passwordHash=encoder.encode(newPassword);user.passwordChangeRequired=false;users.save(user);sessions.deleteAllByUserId(userId);return true;
+  user.passwordHash=encoder.encode(newPassword);user.passwordChangeRequired=false;users.save(user);sessions.deleteAllByUserId(userId);apiKeys.deleteAllByUserId(userId);return true;
  }
  @Transactional public void resetPassword(Long userId,String password){
   validatePassword(password);var user=users.lockById(userId).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"User not found"));
   if(encoder.matches(password,user.passwordHash))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Choose a different password");
-  user.passwordHash=encoder.encode(password);user.passwordChangeRequired=true;user.failedLogins=0;user.lockedUntil=null;users.save(user);sessions.deleteAllByUserId(userId);
+  user.passwordHash=encoder.encode(password);user.passwordChangeRequired=true;user.failedLogins=0;user.lockedUntil=null;users.save(user);sessions.deleteAllByUserId(userId);apiKeys.deleteAllByUserId(userId);
  }
  static void validatePassword(String password){
   if(password==null || password.length()<12 || password.getBytes(StandardCharsets.UTF_8).length>72)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Password requires at least 12 characters and at most 72 UTF-8 bytes");

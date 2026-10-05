@@ -23,7 +23,7 @@ UI-created development identities, reviewed user declarations, image/audio/video
 3. UI private S3-compatible storage setup, test-before-activation, encrypted write-only credentials, version history/rollback and job snapshots are implemented. Test each deployment against its actual service.
 4. Add KMS/HSM providers and production certificate lifecycle. Development expiry status and UI rotation are implemented.
 5. Extend the implemented Rust signing and inspection with isolated queued workers, timestamping, and production trust policy.
-6. Persistent jobs and polling progress are implemented; next add distributed workers, notifications, and webhook integrations.
+6. Persistent jobs and polling progress are implemented; persistent notifications, scoped personal API keys and HMAC webhook outbox/delivery/retry administration are implemented. Next add distributed workers.
 7. JPEG, PNG, WebP, TIFF, WAV, MP3, FLAC, MP4, and PDF pass real signing, inspection, re-signing and tamper checks. Expand representative fixtures and independent-verifier compatibility testing.
 
 ## Administration expansion

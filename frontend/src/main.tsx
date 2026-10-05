@@ -10,6 +10,9 @@ import JobsPanel from "./JobsPanel";
 import WorkspacesPanel from "./WorkspacesPanel";
 import CredentialsPanel from "./CredentialsPanel";
 import StorageProvidersPanel from "./StorageProvidersPanel";
+import ApiKeysPanel from "./ApiKeysPanel";
+import NotificationsPanel from "./NotificationsPanel";
+import WebhooksPanel from "./WebhooksPanel";
 import { setActiveWorkspace } from "./portalFetch";
 type Capability = {
   mime: string;
@@ -288,6 +291,10 @@ function App() {
               <p>
                 Signed in as {user?.username} · {user?.role}
               </p>
+              <NotificationsPanel token={token} />
+              {user?.id != null && (
+                <ApiKeysPanel token={token} canSign={user.role !== "VIEWER"} />
+              )}
               {user?.role === "ADMIN" && (
                 <>
                   {user?.platformAdministrator && (
@@ -441,6 +448,7 @@ function App() {
                     platformAdmin={user?.platformAdministrator ?? false}
                   />
                   <StorageProvidersPanel token={token} />
+                  <WebhooksPanel token={token} />
                   <AdministrationPanel
                     token={token}
                     revision={state.revision}

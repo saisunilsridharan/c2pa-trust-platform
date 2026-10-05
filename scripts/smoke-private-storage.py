@@ -21,6 +21,8 @@ import zlib
 ROOT = Path(__file__).resolve().parent.parent
 ACCESS, SECRET = secrets.token_hex(16), secrets.token_hex(32)
 OBJECTS = {}
+WEBHOOK_SECRET = secrets.token_hex(32)
+EVENTS = {}
 
 def digest(value):
     return hashlib.sha256(value).hexdigest()
@@ -49,6 +51,17 @@ def authenticated(request):
 class S3(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
+
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers['Content-Length']))
+        timestamp = self.headers.get('X-C2PA-Timestamp', '')
+        expected = 'sha256=' + hmac.new(WEBHOOK_SECRET.encode(), timestamp.encode() + b'.' + body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, self.headers.get('X-C2PA-Signature', '')) or abs(time.time() - int(timestamp)) > 60:
+            self.send_response(403); self.end_headers(); return
+        event = json.loads(body)
+        if event['type'] != 'connection.test':
+            EVENTS[self.headers['X-C2PA-Delivery-Id']] = event
+        self.send_response(204); self.end_headers()
 
     def handle_object(self):
         try:
@@ -144,6 +157,7 @@ def run():
             token = call('/auth/login', {'username': 'storage-admin', 'password': password})['token']
             access = call('/admin/credentials', {'label': 'Private storage access', 'value': ACCESS})['id']
             secret = call('/admin/credentials', {'label': 'Private storage secret', 'value': SECRET})['id']
+            webhook_secret = call('/admin/credentials', {'label': 'Webhook HMAC', 'value': WEBHOOK_SECRET})['id']
             assert 'value' not in call('/admin/credentials')[0]
             backup_password = secrets.token_urlsafe(24)
             backup = call('/admin/security/backup', {'password': backup_password, 'acknowledgeKeyBackup': True}, raw=True)
@@ -160,6 +174,14 @@ def run():
             call('/admin/storage/providers/test', selection)
             assert not OBJECTS
             state = call('/admin/storage/providers/activate', selection)
+            webhook = call('/admin/webhooks')
+            webhook = call('/admin/webhooks/draft', {'revision': webhook['revision'], 'configuration': {
+                'enabled': True, 'endpoint': f'http://127.0.0.1:{fixture.server_port}/events',
+                'credentialId': webhook_secret, 'allowLoopbackHttp': True, 'maxAttempts': 3}}, method='PUT')
+            webhook_selection = {'revision': webhook['revision'], 'versionId': webhook['draft']['id'], 'acknowledgeActivation': True}
+            denied(lambda: call('/admin/webhooks/activate', webhook_selection), 409)
+            call('/admin/webhooks/test', webhook_selection)
+            call('/admin/webhooks/activate', webhook_selection)
             workspace = call('/workspaces', {'name': 'Credential isolation'})['id']
             other = call('/admin/storage/providers', workspace=workspace)
             denied(lambda: call('/admin/storage/providers/draft', {'revision': other['revision'], 'configuration': settings}, method='PUT', workspace=workspace), 404)
@@ -173,6 +195,11 @@ def run():
                       'acknowledgePublicClaims': 'true', 'expectedProfileRevision': configuration['activeRevision'],
                       'expectedIdentityFingerprint': configuration['signingFingerprint']}
             data, headers = multipart(fields, 'sample.png', png)
+            session = token
+            api_key = call('/auth/api-keys', {'label': 'Isolated worker integration', 'scopes': ['READ', 'SIGN', 'VERIFY'], 'days': 1})
+            token = api_key['token']
+            denied(lambda: call('/admin/storage/providers'), 403)
+            denied(lambda: call('/jobs', workspace=workspace), 403)
             job = call('/jobs', data=data, extra={**headers, 'Idempotency-Key': secrets.token_hex(16)})
             until = time.monotonic() + 50
             while time.monotonic() < until:
@@ -185,6 +212,23 @@ def run():
             report = json.loads(call(f'/jobs/{job["id"]}/report', raw=True))
             assert report['validation_state'] == 'Valid'
             signed = call(f'/jobs/{job["id"]}/download', raw=True)
+            token = session
+            until = time.monotonic() + 20
+            while time.monotonic() < until:
+                deliveries = call('/admin/webhooks/deliveries')
+                if deliveries and deliveries[0]['state'] == 'DELIVERED': break
+                time.sleep(.2)
+            assert deliveries[0]['state'] == 'DELIVERED'
+            assert EVENTS[deliveries[0]['id']]['jobId'] == job['id']
+            assert EVENTS[deliveries[0]['id']]['type'] == 'signing.completed'
+            notification = call('/notifications')
+            assert notification['unread'] == 1 and notification['items'][0]['jobId'] == job['id']
+            call(f'/notifications/{notification["items"][0]["id"]}/read', body={})
+            assert call('/notifications')['unread'] == 0
+            call('/auth/api-keys/' + api_key['key']['id'], method='DELETE')
+            token = api_key['token']
+            denied(lambda: call('/jobs'), 401)
+            token = session
             # Switch future storage to local; old jobs must retain their remote snapshot.
             state = call('/admin/storage/providers/draft', {'revision': state['revision'], 'configuration': {'provider': 'LOCAL'}}, method='PUT')
             selection = {'revision': state['revision'], 'versionId': state['draft']['id'], 'acknowledgeActivation': True}
@@ -195,13 +239,16 @@ def run():
             stop(); start()
             assert call(f'/jobs/{job["id"]}/download', raw=True) == signed
             assert call('/admin/security')['available']
+            assert call('/notifications')['unread'] == 0
+            assert call('/notifications')['items'][0]['readAt']
+            assert call('/admin/webhooks/deliveries')[0]['state'] == 'DELIVERED'
             (backend / '.local/credential-key').unlink()
             assert call('/admin/security')['state'] == 'RESTORE_REQUIRED'
             denied(lambda: call(f'/jobs/{job["id"]}/download', raw=True), 503)
             data, headers = multipart({'password': backup_password, 'acknowledgeRestore': 'true'}, 'key.backup', backup)
             assert call('/admin/security/restore', data=data, extra=headers)['available']
             assert call(f'/jobs/{job["id"]}/download', raw=True) == signed
-            print('Private storage APIs, SigV4, native C2PA job, provider snapshots, workspace isolation, restart persistence and encryption-key recovery passed.')
+            print('Private storage APIs, SigV4, scoped API-key signing/revocation, native C2PA job, provider snapshots, notifications, HMAC webhooks, workspace isolation, restart persistence and encryption-key recovery passed.')
         finally:
             stop(); fixture.shutdown(); fixture.server_close(); log.close()
 
