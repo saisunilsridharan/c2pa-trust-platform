@@ -12,6 +12,7 @@ type Identity = {
   fingerprint: string;
   createdAt: string;
   testedAt: string | null;
+  expiresAt: string;
 };
 export default function HardwareIdentitiesPanel({
   token,
@@ -27,6 +28,13 @@ export default function HardwareIdentitiesPanel({
       keyAlias: "",
       pinCredential: "",
     }),
+    [subject, setSubject] = useState({
+      commonName: "",
+      organization: "",
+      country: "",
+    }),
+    [renewal, setRenewal] = useState(""),
+    [certificateAck, setCertificateAck] = useState(false),
     [chain, setChain] = useState(""),
     [rows, setRows] = useState<Identity[]>([]),
     [selected, setSelected] = useState(""),
@@ -170,7 +178,13 @@ export default function HardwareIdentitiesPanel({
       </button>
       <label>
         Identity version
-        <select value={selected} onChange={(e) => setSelected(e.target.value)}>
+        <select
+          value={selected}
+          onChange={(e) => {
+            setSelected(e.target.value);
+            setCertificateAck(false);
+          }}
+        >
           <option value="">Select identity version</option>
           {rows.map((r) => (
             <option key={r.id} value={r.id}>
@@ -187,7 +201,7 @@ export default function HardwareIdentitiesPanel({
           {current.testedAt
             ? new Date(current.testedAt).toLocaleString()
             : "not tested"}
-          .
+          . Certificate expires: {new Date(current.expiresAt).toLocaleString()}.
         </p>
       )}
       <button
@@ -203,6 +217,133 @@ export default function HardwareIdentitiesPanel({
         }
       >
         Test token & C2PA signing
+      </button>
+      <h3>Certificate request and renewal</h3>
+      <p>
+        Generate a PKCS#10 request signed by the selected token key, then submit
+        it to your private CA. The request includes C2PA signing usage. The CA
+        determines certificate policy and issuance. Download requests before the
+        current certificate expires. A replacement chain creates a separate
+        identity version and must pass real C2PA signing before approval;
+        existing choices and queued jobs retain their original certificates.
+      </p>
+      <label>
+        Certificate common name
+        <input
+          maxLength={200}
+          value={subject.commonName}
+          onChange={(e) => {
+            setSubject({ ...subject, commonName: e.target.value });
+            setCertificateAck(false);
+          }}
+        />
+      </label>
+      <label>
+        Organization
+        <input
+          maxLength={200}
+          value={subject.organization}
+          onChange={(e) => {
+            setSubject({ ...subject, organization: e.target.value });
+            setCertificateAck(false);
+          }}
+        />
+      </label>
+      <label>
+        Country code
+        <input
+          maxLength={2}
+          value={subject.country}
+          onChange={(e) => {
+            setSubject({ ...subject, country: e.target.value.toUpperCase() });
+            setCertificateAck(false);
+          }}
+        />
+      </label>
+      <label>
+        Replacement certificate and issuer chain PEM
+        <textarea
+          maxLength={64000}
+          value={renewal}
+          onChange={(e) => {
+            setRenewal(e.target.value);
+            setCertificateAck(false);
+          }}
+        />
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          checked={certificateAck}
+          onChange={(e) => setCertificateAck(e.target.checked)}
+        />
+        I reviewed the subject or replacement chain and the selected certificate
+        fingerprint.
+      </label>
+      <button
+        disabled={
+          busy || !current || !certificateAck || !subject.commonName.trim()
+        }
+        onClick={() =>
+          run(async () => {
+            const response = await fetch(
+              "/api/v1/admin/hardware-identities/" + current!.id + "/csr",
+              {
+                method: "POST",
+                headers: {
+                  "X-Admin-Token": token,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  expectedIdentityFingerprint: current!.fingerprint,
+                  subject,
+                  acknowledgeCertificateSubject: true,
+                }),
+              },
+            );
+            if (!response.ok)
+              throw new Error(
+                "Certificate request failed. Check the selected token, certificate validity, PIN and subject.",
+              );
+            const url = URL.createObjectURL(await response.blob());
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = "signing-certificate-request.pem";
+            link.click();
+            URL.revokeObjectURL(url);
+            setCertificateAck(false);
+            setMessage(
+              "Token-signed CSR downloaded. Submit it to your private CA; no private key is included.",
+            );
+          })
+        }
+      >
+        Download token-signed CSR
+      </button>
+      <button
+        disabled={busy || !current || !certificateAck || !renewal.trim()}
+        onClick={() =>
+          run(async () => {
+            const identity = await request(
+              "/" + current!.id + "/renewal",
+              "POST",
+              {
+                expectedIdentityFingerprint: current!.fingerprint,
+                certificateChainPem: renewal,
+                acknowledgeCertificateReplacement: true,
+              },
+            );
+            await load();
+            setSelected(identity.id);
+            setRenewal("");
+            setCertificateAck(false);
+            setMessage(
+              "New certificate version passed token-key matching and real C2PA signing. Review and approve it with a profile below.",
+            );
+          })
+        }
+      >
+        Test replacement certificate as new identity
       </button>
       <label>
         Approved choice name

@@ -230,7 +230,7 @@ def initialize_token(command, environment, so_pin, user_pin):
 def chunk(kind, data):
     return struct.pack('!I', len(data)) + kind + data + struct.pack('!I', zlib.crc32(kind + data))
 
-def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, formats=False, audit_lock=False):
+def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, formats=False, audit_lock=False, certificates=False):
     global LOCK_MODE
     global TSA_MODE
     assert (ROOT / 'backend/target/portal-api-0.1.0.jar').is_file(), 'Build the Java API first'
@@ -638,6 +638,54 @@ def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, 
                 assert call('/admin/audit-storage/deliveries/' + row['id'] + '/verify', {})['verified']
                 assert call('/admin/audit-storage/deliveries/' + row['id'] + '/receipt') == receipt
                 print('S3 Object Lock: version-specific receipts, COMPLIANCE retention, deletion refusal, provider snapshots, negative-provider checks, workspace isolation and restart persistence passed.', flush=True)
+            if certificates:
+                assert softhsm_dir, 'Certificate lifecycle smoke requires --softhsm-dir'
+                csr_request = {'expectedIdentityFingerprint': hardware['fingerprint'], 'subject': {'commonName': 'Renewed hardware signer', 'organization': 'Private fixture', 'country': 'IN'}, 'acknowledgeCertificateSubject': True}
+                denied(lambda: call('/admin/hardware-identities/' + hardware['id'] + '/csr', {**csr_request, 'acknowledgeCertificateSubject': False}), 400)
+                denied(lambda: call('/admin/hardware-identities/' + hardware['id'] + '/csr', {**csr_request, 'expectedIdentityFingerprint': '0' * 64}), 409)
+                denied(lambda: call('/admin/hardware-identities/' + hardware['id'] + '/csr', csr_request, workspace=workspace), 404)
+                csr = call('/admin/hardware-identities/' + hardware['id'] + '/csr', csr_request, raw=True)
+                folder = sandbox / 'certificate-renewal'; folder.mkdir(mode=0o700)
+                (folder / 'request.pem').write_bytes(csr)
+                def openssl(*arguments):
+                    return subprocess.run(['openssl', *arguments], cwd=folder, check=True, capture_output=True, timeout=15)
+                openssl('req', '-in', 'request.pem', '-verify', '-noout')
+                new_public = openssl('req', '-in', 'request.pem', '-pubkey', '-noout').stdout
+                old_public = openssl('x509', '-in', str(key_directory / 'chain.pem'), '-pubkey', '-noout').stdout
+                assert new_public == old_public
+                openssl('req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-keyout', 'root.key', '-out', 'root.pem', '-days', '3', '-subj', '/CN=Disposable Renewal CA', '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign')
+                (folder / 'root.key').chmod(0o600)
+                (folder / 'extensions').write_text('basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=emailProtection,1.3.6.1.4.1.62558.2.1\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n')
+                openssl('x509', '-req', '-in', 'request.pem', '-CA', 'root.pem', '-CAkey', 'root.key', '-CAcreateserial', '-out', 'leaf.pem', '-days', '2', '-extfile', 'extensions')
+                chain = (folder / 'leaf.pem').read_text() + (folder / 'root.pem').read_text()
+                renewal_request = {'expectedIdentityFingerprint': hardware['fingerprint'], 'certificateChainPem': chain, 'acknowledgeCertificateReplacement': True}
+                denied(lambda: call('/admin/hardware-identities/' + hardware['id'] + '/renewal', {**renewal_request, 'certificateChainPem': (key_directory / 'chain.pem').read_text()}), 400)
+                alternate_directory = original_directory.parent / (original_directory.parent / 'current').read_text().strip()
+                denied(lambda: call('/admin/hardware-identities/' + hardware['id'] + '/renewal', {**renewal_request, 'certificateChainPem': (alternate_directory / 'chain.pem').read_text()}), 400)
+                denied(lambda: call('/admin/hardware-identities/' + hardware['id'] + '/renewal', renewal_request, workspace=workspace), 404)
+                # Native callback threads must see a committed identity; failed probes remain retryable.
+                original_token_config = token_config.read_text()
+                unavailable_token_directory = sandbox / 'unavailable-token'; unavailable_token_directory.mkdir(mode=0o700)
+                try:
+                    token_config.write_text('directories.tokendir = ' + str(unavailable_token_directory) + '\nobjectstore.backend = file\nlog.level = ERROR\n')
+                    denied(lambda: call('/admin/hardware-identities/' + hardware['id'] + '/renewal', renewal_request), 502)
+                finally:
+                    token_config.write_text(original_token_config)
+                pending_renewal = next(i for i in call('/admin/hardware-identities') if i['id'] != hardware['id'])
+                assert pending_renewal['testedAt'] is None
+                assert call('/admin/hardware-identities/' + pending_renewal['id'] + '/test', {})['testedAt']
+                renewed = call('/admin/hardware-identities/' + hardware['id'] + '/renewal', renewal_request)
+                assert renewed['id'] != hardware['id'] and renewed['fingerprint'] != hardware['fingerprint'] and renewed['testedAt']
+                renewed_choice = call('/admin/hardware-identities/' + renewed['id'] + '/approve', {'label': 'Renewed hardware identity', 'expectedProfileRevision': call('/portal/configuration')['activeRevision'], 'expectedIdentityFingerprint': renewed['fingerprint'], 'acknowledgePrivateTrust': True})
+                renewal_fields = {**fields, 'expectedProfileRevision': renewed_choice['profileRevision'], 'expectedIdentityFingerprint': renewed_choice['fingerprint'], 'signingOptionId': renewed_choice['id'], 'signingOptionRevision': renewed_choice['revision']}
+                data, headers = multipart(renewal_fields, 'renewed.png', png)
+                renewed_signed = call('/signing', data=data, extra=headers, raw=True)
+                data, headers = multipart({}, 'renewed.png', renewed_signed)
+                assert call('/verification', data=data, extra=headers)['validation_state'] == 'Valid'
+                assert call(f'/jobs/{job["id"]}/download', raw=True) == signed
+                stop(); start()
+                assert any(i['id'] == renewed['id'] and i['testedAt'] for i in call('/admin/hardware-identities'))
+                print('HSM certificate lifecycle: independently verified token-signed CSR, same-key renewed chain, rejection of mismatched/unchanged certificates, real C2PA signing, immutable old jobs and restart persistence passed.', flush=True)
             if formats:
                 helpers = runpy.run_path(str(ROOT / 'scripts/smoke-formats.py'))
                 profile = call('/admin/configuration')
@@ -688,5 +736,6 @@ if __name__ == '__main__':
     parser.add_argument('--namespace', action='store_true', help='Require real network/filesystem namespace isolation for native signing and inspection')
     parser.add_argument('--formats', action='store_true', help='Exercise all nine embedded formats, re-signing and tamper detection with the selected identity')
     parser.add_argument('--audit-lock', action='store_true', help='Test protected audit checkpoint storage with an independent S3 Object Lock protocol fixture')
+    parser.add_argument('--certificates', action='store_true', help='Test token-signed CSR and immutable certificate renewal with an independent OpenSSL private CA')
     args = parser.parse_args()
-    run(args.postgres_bin, args.softhsm_dir, args.timestamps, args.namespace, args.formats, args.audit_lock)
+    run(args.postgres_bin, args.softhsm_dir, args.timestamps, args.namespace, args.formats, args.audit_lock, args.certificates)

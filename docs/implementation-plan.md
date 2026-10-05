@@ -1,67 +1,43 @@
-# Implementation roadmap
+# C2PA portal implementation and acceptance plan
 
-## Product contract
+## Product and architecture
 
-Routine application configuration must be possible through React administration screens. Only database connection settings are external application configuration. Infrastructure provisioning (TLS, network policies, deployed capacity, and a managed root of trust) is a deployment prerequisite. Initial administrator enrollment needs a protected bootstrap credential. Production enrollment will replace the local development token flow.
+React provides signing, verification and administration. Java/Spring Boot provides accounts, workspace authorization, durable jobs, encrypted provider credentials, audit records and Swagger UI. Rust/c2pa-rs 0.91.1 embeds and verifies manifests. All application/provider settings are configured through the UI; database connection settings remain external. Installed toolchains, trusted native modules and Linux isolation support are deployment prerequisites.
 
-Users upload content, inspect existing provenance, select an approved signing profile and identity, review the exact public claims, authorize a job, and download a separately stored signed version with its verification report. C2PA protects claim integrity; it does not establish factual truth.
+Users select approved profile/certificate combinations, review public creator/title/AI claims, and sign immediately or submit persistent batches. Inputs stay separate from outputs. The backend detects file bytes rather than trusting names or MIME headers. JPEG, PNG, WebP, TIFF, WAV, MP3, FLAC, MP4 and basic PDF are supported. Arbitrary files and every PDF/media variant are not automatically supported by embedded C2PA.
 
-## Architecture
+## Implemented application features
 
-React calls Java APIs. Java enforces authentication, workspace permissions, configuration, asset storage, and job state. Rust workers perform C2PA processing. Signing keys stay in KMS/HSM services. PostgreSQL stores users, memberships, asset versions, profiles, identities, configuration versions, jobs, verification reports, and audits. The implemented local/private mode stores originals and signed outputs in protected local directories; UI-configured private S3-compatible storage is implemented alongside local processing files.
+- Named accounts, ADMIN/SIGNER/VIEWER roles, platform recovery, workspace memberships and isolation, account disabling, BCrypt passwords, forced password replacement, session revocation and personal scoped API keys.
+- Authenticator TOTP MFA with encrypted purpose-bound secrets, replay protection and hashed single-use backup codes. One-time offline account-recovery keys revoke prior sessions/API keys. Shared database account lockout persists across instances.
+- Private OIDC with immutable UI configuration, discovery/key tests, activation/history/rollback, PKCE, browser-bound single-use state, nonce and signed-token validation, explicit linking to existing accounts and local MFA enforcement. No automatic email/role provisioning.
+- UI profiles and history/rollback; development identities; private EC P-256 PKCS#12 import with real SDK probes; approved immutable profile/certificate choices; rotation, withdrawal and stale-review/idempotency protection.
+- Private PKCS#11 signing with encrypted PIN references, trusted module checks, bounded separate Java provider processes, private Rust callback sockets and real test-before-approval. Hardware keys are not exported through the API.
+- Hardware certificate requests and renewal: token-signed PKCS#10 CSR download, public subject review, expiry display and same-key replacement-chain import. Replacement creates a separate identity version and must pass real SDK signing before approval. Failed probes retain a retryable draft; original choices and queued jobs preserve their original certificates. CA-specific automatic issuance is separate work.
+- Versioned workspace private CA trust, signed-sample tests, activation/rollback and optional strict trusted signing. Private trust is identified separately from official public trust. SDK remote-manifest/OCSP/network fetching is disabled in embedded mode.
+- Private RFC 3161 timestamp endpoints, encrypted bearer references, separate TLS/TSA CA anchors, mandatory verified timestamp signing probes, tested activation/rollback and immutable job snapshots. Responses are bounded, redirect-free and validated against the exact request nonce/imprint. Invalid or untrusted timestamps fail signing.
+- Persistent jobs, original/signed assets and reports, per-user access, immutable claims/provider/certificate/trust/timestamp/budget snapshots, idempotency, polling, notifications, manual retry and UI retention.
+- Flyway migrations, additive legacy upgrades and Hibernate schema validation. Database leases coordinate claims and preserve live attempts across restarts; stale completion is refused and attempt output directories isolate retries.
+- UI worker timeout, retry count, memory/CPU limits and optional bubblewrap user/PID/network/filesystem namespaces. Native workers have a cleared environment and dedicated writable output directory. Namespace capability is tested before selection and does not fall back silently. Multiple application instances still require common storage/identity paths and the same encryption key.
+- Private S3-compatible asset storage with TLS/private CA, encrypted credentials, tested immutable provider versions, rollback and per-job snapshots. Asset retention removes remote assets before local/database cleanup.
+- Write-only AES-256-GCM provider credentials and UI passphrase-protected encryption-key backup/restore. Losing the matching key requires restoring it; credentials are never automatically replaced.
+- Signed HMAC webhooks, durable outbox, bounded retries, version snapshots, delivery administration and deduplication IDs.
+- Workspace audit hash chains, integrity verification and external checkpoint export/comparison. Private S3 Object Lock COMPLIANCE anchoring adds UI configuration/test/activation/rollback, retained probes, manual/scheduled checkpoints, durable delivery snapshots/retries, protected version re-verification and independently downloadable receipts. Bucket administration/provider integrity remain trust assumptions.
 
-The implemented persistent queue invokes one bounded local Rust process per instance, uses database leases to coordinate claims, and recovers expired leases. Multiple instances require common storage and identity paths. Local resource-limited workers and optional Linux filesystem/network namespaces are implemented and tested. A distributed worker pool remains future work. Preserve input hashes, profile versions, configuration versions, and job idempotency. Implemented jobs use QUEUED, RUNNING, COMPLETED, FAILED, and retention cleanup DELETING states.
+## Verified evidence
 
-## Completed development signing slice
+Java tests cover authorization, account protections, credentials, migrations, leasing, audit integrity, outbox failure/retry, workspace isolation and private OIDC protocol validation. React build and five workspace-request regressions pass; Rust tests exercise the timestamp transport.
 
-UI-created development identities, reviewed user declarations, image/audio/video/PDF signed downloads, post-sign validation, original ingredient retention, and tampering checks are implemented. Configuration history/rollback, audit records, and development certificate status/rotation are implemented. Batch jobs, original/signed assets, downloadable validation reports, per-user job access, manual retries, startup recovery, UI retention, and operations diagnostics are implemented for a single local instance. UI PKCS#12 private identity import includes chain/key checks and a real Rust signing probe. Public certificate trust, trusted timestamps, Private PKCS#11 signing is implemented and SoftHSM-tested; vendor hardware compatibility and issuance/renewal remain outstanding. Private S3-compatible asset storage, version history/rollback, connectivity tests and per-job snapshots are implemented. Write-only encrypted service credentials and UI encryption-key backup/restore are implemented.
+The isolated `scripts/smoke-private-storage.py` uses temporary H2 or PostgreSQL 17, an independent SigV4/HMAC/Object Lock fixture, actual non-exportable SoftHSM keys and an independent OpenSSL RFC 3161 TSA. It verifies native signing, snapshots, MFA/recovery, restart persistence and encryption-key restoration without modifying real user data. `--namespace` requires genuine Linux namespaces; `--formats` exercises all nine formats, re-signing and tamper rejection through the software HSM. `--audit-lock` rejects providers with missing versioning, incorrect retention, deletion-enabled versions or changed contents. `--certificates` uses an independent OpenSSL CA to verify CSR proof of possession and same-key replacement signing, including unavailable-token retry recovery.
 
-## Next: production signing vertical slice
+These tests establish the implemented protocols and selected fixtures, not compatibility with every vendor or official public trust.
 
-1. Named-user enrollment/login, organization roles, account disabling, password changes, and user-attributed audits are implemented. Administrator-assisted recovery with forced password change and session revocation/counts are implemented. Workspace-scoped profiles, identities, memberships, jobs, retention, audits and operations are implemented, with platform administrator recovery. Authenticator MFA and one-time-key self-service recovery are implemented. Private OIDC with explicit account linking is implemented and protocol-tested. Broader distributed/edge login rate controls remain pending.
-2. Flyway migrations, legacy additive-upgrade checks and a real PostgreSQL 17.11 Java/Rust integration flow are implemented.
-3. UI private S3-compatible storage setup, test-before-activation, encrypted write-only credentials, version history/rollback and job snapshots are implemented. Test each deployment against its actual service.
-4. Private PKCS#11 adapters, UI identity drafts, real signing probes and approved hardware choices are implemented and tested with non-exportable SoftHSM keys. Add vendor deployment verification, other KMS providers and production certificate issuance/renewal. Development expiry status and UI rotation are implemented.
-5. Extend the implemented Rust signing and inspection with isolated queued workers, timestamping, and production trust policy.
-6. Persistent jobs and polling progress are implemented; persistent notifications, scoped personal API keys and HMAC webhook outbox/delivery/retry administration are implemented. Database worker leases, attempt isolation and UI processing limits are implemented; local resource limits and optional namespace isolation are implemented; a distributed worker pool remains pending.
-7. JPEG, PNG, WebP, TIFF, WAV, MP3, FLAC, MP4, and PDF pass real signing, inspection, re-signing and tamper checks. Expand representative fixtures and independent-verifier compatibility testing.
+## Remaining production work
 
-## Administration expansion
+1. Accept the deployed private OIDC provider, vendor HSM/module, S3/Object Lock bucket and TSA using their UI tests and real deployment policies. Endpoints, actual device/provider details and securely entered credentials are needed.
+2. Select a private CA before implementing automatic issuance/renewal. The current token-signed CSR/replacement workflow supports manual private-CA issuance; local PKCS#12 replacement remains available through identity import.
+3. Implement official public trust-list validation and an explicit production revocation policy before claiming public trust. Private CA/TSA trust does not establish this.
+4. Build a separately deployed distributed worker pool if shared-storage application instances are insufficient. Local namespace isolation and database leases are implemented; they do not provide independent remote worker registration, routing or deployment.
+5. Expand independent-verifier and complex-media/PDF interoperability checks, edge/distributed login rate controls and any additional vendor KMS adapters required by the deployment.
 
-Organization and branding; users and signing permissions; authentication providers; storage and retention; signing certificates and key references; assertion profiles and privacy; supported formats and limits; trust anchors and trust lists; timestamp providers; processing retries and limits; API/webhook integrations; health and audit history.
-
-Each configuration area supports draft, validation or connectivity test, activation, version history, and rollback. Concurrent edits must return a conflict. Active jobs retain their initial configuration version. Avoid authentication changes that lock out the last administrator; require successful provider tests and a recovery path.
-
-Secrets are write-only, encrypted using a managed root of trust outside the database, and excluded from logs, OpenAPI examples, browser persistence, and config history. Connectivity tests must constrain destinations to prevent SSRF. Never accept raw production signing keys into general configuration records.
-
-## Format strategy
-
-Publish a capability registry derived from the installed SDK version and tested operations. Enable only tested formats. Evaluate image, audio, video, and PDF capabilities separately. External manifests require a discovery and compatibility strategy. Detached signatures for arbitrary files are a distinct product operation; do not label them embedded C2PA credentials.
-
-## Production acceptance
-
-End-to-end signing through the UI; unauthorized signing denied; workspace isolation; modified-content detection; invalid, expired, and untrusted certificate handling; timestamp checks; restart persistence; idempotent retries and worker recovery; key protection; malformed-file resource limits; certificate rotation; audits; rollback; independent verifier compatibility.
-
-## Selected provider direction
-
-The user selected local/private services first. Prioritize private CA and local PKCS#12 signing (implemented), private object storage, local account recovery/session administration (implemented), private OIDC and PKCS#11/HSM adapters, then private trust/timestamp services. Do not label imported certificates publicly trusted without trust-list validation. Encrypted service credentials and UI master-key backup/recovery are implemented. Private S3-compatible storage connectivity tests and activation are implemented; Private OIDC is implemented; deployed provider verification, Private PKCS#11 signing is implemented and SoftHSM-tested. Vendor hardware acceptance, certificate issuance/renewal and trust/timestamp services remain pending.
-
-## Latest verified application status
-
-Completed: nine tested formats; workspace memberships and isolation; encrypted service credentials and key backup/restore; UI-configured private S3-compatible storage with tested versions and job snapshots; scoped personal API keys; persistent job notifications; signed webhook outbox, delivery retries and administration; Flyway migrations; database worker leases and attempt isolation; UI processing limits; audit hash chains and external-checkpoint export/comparison. The isolated H2 and PostgreSQL flows pass with the real Rust signer.
-
-Remaining application work: deployed OIDC verification and broader login rate controls; vendor PKCS#11/HSM acceptance, other KMS adapters and certificate issuance/renewal; official public trust-list validation and production revocation policy;  isolated distributed workers; deployed immutable-bucket acceptance and wider independent-verifier compatibility. Private S3 has protocol regression coverage; each actual deployment still needs its own connectivity/compatibility test. Do not describe the complete production roadmap as finished.
-
-Authenticator TOTP MFA and offline-key self-service recovery are implemented with encrypted, purpose-bound factor secrets, replay protection, hashed single-use codes, shared lockout and session/API-key revocation. Private OIDC is implemented with PKCE, browser-bound single-use state, signed-token validation, explicit account linking and UI version/test/activation/rollback. Protocol regression tests pass; actual deployed provider verification remains pending.
-
-Selectable approved profile/certificate combinations are implemented for immediate and queued signing. UI publication snapshots claims and certificate references; withdrawal and re-enable affect future requests. Real H2/PostgreSQL tests cover rotation, stale reviews, withdrawal, workspace isolation, immutable job snapshots and idempotency. Independent profile/identity libraries with per-user approval workflows can extend these combinations later.
-
-Private PKCS#11 EC P-256 signing is implemented through UI identity drafts/test/approval and immutable signing choices. Bounded Java native-provider processes use encrypted PIN references and private local Rust callback sockets. Real H2/PostgreSQL tests pass against a non-exportable SoftHSM token after removal of the fixture PEM key. Actual vendor devices require deployment acceptance; public trust is not implied by token use.
-
-Workspace private CA trust policy is implemented with UI immutable drafts, signed-sample tests, activation/history/rollback and optional strict trusted signing. Rust enforces per-job snapshots and identifies private policy trust separately from public trust. H2/PostgreSQL/SoftHSM flows pass; wrong-CA samples are rejected and later policy changes do not alter captured jobs. SDK-originated networking is disabled. Private timestamping is implemented; official public trust-list validation and production revocation policy remain pending.
-
-Private RFC 3161 timestamping is implemented through UI encrypted-credential drafts, selected-identity signing probes, tested activation/history/rollback and captured job snapshots. Nonce/imprint, signature and private TSA trust checks are mandatory; SDK networking is disabled and Java uses bounded authenticated private HTTP. H2/PostgreSQL/SoftHSM flows pass against independent OpenSSL timestamps, including malformed/oversized/redirected/mismatched/untrusted responses. Actual deployed provider acceptance remains necessary.
-
-Local worker limits and optional bubblewrap namespaces are configured through the UI and captured per job. H2/PostgreSQL end-to-end tests pass with real software-HSM and private RFC 3161 callbacks; all nine embedded formats pass signing/read/re-sign/tamper checks inside namespaces. Certificate-import readiness probes use the same native worker limits. Actual vendor/provider acceptance remains separate.
-
-External audit anchoring is implemented for private S3 Object Lock COMPLIANCE buckets. UI immutable versions, retained connection probes, activation/rollback/disable, automatic intervals, manual exports, durable snapshots/retries, version-specific downloadable receipts and external re-verification are available. Independent protocol negatives and restart tests pass; deployment acceptance and independent storage administration remain required.
+The complete production roadmap is not finished. Keep completed local/private application work distinct from live provider acceptance and the remaining architectural features.
