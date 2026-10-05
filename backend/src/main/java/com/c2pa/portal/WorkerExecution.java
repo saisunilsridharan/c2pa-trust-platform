@@ -23,7 +23,8 @@ import java.util.concurrent.atomic.AtomicReference;
   Process process=null;Path bridge=null;ServerSocketChannel server=null;AtomicReference<SocketChannel> peer=new AtomicReference<>();Thread handler=null;
   try{
    bridge=Files.createTempDirectory("c2pa-worker-private-");Files.setPosixFilePermissions(bridge,java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
-   List<String> command=new ArrayList<>(List.of(worker.toString(),"sign",input.toString(),output.toString(),manifest.toString(),certificate.toString(),key));
+   Path stagedDirectory=Files.createDirectory(bridge.resolve("output"));Path staged=stagedDirectory.resolve(output.getFileName());
+   List<String> command=new ArrayList<>(List.of(worker.toString(),"sign",input.toString(),staged.toString(),manifest.toString(),certificate.toString(),key));
    if(key.startsWith("pkcs11:") || timestampSnapshot!=null){
     String identity=key.startsWith("pkcs11:")?key.substring(7):null;if(identity!=null)hardware.get(identity,workspace);
     Path socket=bridge.resolve("sign.sock");server=ServerSocketChannel.open(StandardProtocolFamily.UNIX);server.bind(UnixDomainSocketAddress.of(socket));
@@ -35,11 +36,11 @@ import java.util.concurrent.atomic.AtomicReference;
    }
    if(trustSnapshot!=null && timestampSnapshot==null){Path policy=bridge.resolve("trust-policy.json");Files.writeString(policy,trust.workerConfiguration(trustSnapshot));command.add(policy.toString());}
    process=sandbox.process(command,budget).redirectOutput(report.toFile()).redirectError(error.toFile()).start();
-   if(!process.waitFor(timeout,TimeUnit.SECONDS))throw new IOException("Signing timed out");if(process.exitValue()==0 && Files.size(report)>8*1024*1024L){Files.deleteIfExists(output);throw new IOException("Report exceeds limit");}return process.exitValue();
+   if(!process.waitFor(timeout,TimeUnit.SECONDS))throw new IOException("Signing timed out");if(process.exitValue()==0 && Files.size(report)>8*1024*1024L){Files.deleteIfExists(output);throw new IOException("Report exceeds limit");}if(process.exitValue()==0){if(!Files.isRegularFile(staged,LinkOption.NOFOLLOW_LINKS))throw new IOException("Signed output is not a regular file");Files.move(staged,output,StandardCopyOption.REPLACE_EXISTING);}return process.exitValue();
   }finally{
    if(process!=null && process.isAlive()){process.destroyForcibly();process.waitFor(5,TimeUnit.SECONDS);}
    if(server!=null)server.close();var connection=peer.get();if(connection!=null)connection.close();if(handler!=null)handler.join(20000);
-   if(bridge!=null){try(var files=Files.list(bridge)){for(var path:files.toList())Files.deleteIfExists(path);}Files.deleteIfExists(bridge);}
+   if(bridge!=null){try(var files=Files.walk(bridge)){for(var path:files.sorted(Comparator.reverseOrder()).toList())Files.deleteIfExists(path);}}
   }
  }
  public int inspect(Long workspace,Path worker,Path input,String configuration,Path report,Path error,int timeout)throws Exception{

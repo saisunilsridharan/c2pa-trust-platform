@@ -35,7 +35,7 @@ public class PrivateObjectStorage {
   int n=0;for(var certificate:certificates){var x509=(java.security.cert.X509Certificate)certificate;x509.checkValidity();if(x509.getBasicConstraints()<0)throw new IllegalArgumentException("A CA certificate is required");store.setCertificateEntry("private-ca-"+(n++),certificate);}
   var factory=javax.net.ssl.TrustManagerFactory.getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm());factory.init(store);return factory.getTrustManagers();
  }
- private S3Client client(Long workspace,Configuration settings)throws Exception {
+ S3Client client(Long workspace,Configuration settings)throws Exception {
   var endpoint=ServiceEndpoint.validate(settings.endpoint(),settings.allowLoopbackHttp());
   byte[] access=credentials.read(workspace,settings.accessKeyCredential()),secret=null;
   try {

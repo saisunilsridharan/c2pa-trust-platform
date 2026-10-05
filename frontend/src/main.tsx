@@ -1,3 +1,4 @@
+import AuditStoragePanel from "./AuditStoragePanel";
 import TimestampsPanel from "./TimestampsPanel";
 import TrustPolicyPanel from "./TrustPolicyPanel";
 import HardwareIdentitiesPanel from "./HardwareIdentitiesPanel";
@@ -477,6 +478,7 @@ function App() {
                   <WebhooksPanel token={token} />
                   <ProcessingPanel token={token} />
                   <TimestampsPanel token={token} />
+                  <AuditStoragePanel token={token} />
                   <TrustPolicyPanel token={token} />
                   <HardwareIdentitiesPanel
                     token={token}

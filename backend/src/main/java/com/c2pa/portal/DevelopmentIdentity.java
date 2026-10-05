@@ -97,11 +97,12 @@ public class DevelopmentIdentity {
    Files.write(temporary.resolve("probe.png"),Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="));
    Files.writeString(temporary.resolve("probe.json"),"{\"title\":\"Identity readiness probe\",\"format\":\"image/png\",\"claim_generator_info\":[{\"name\":\"C2PA Trust Portal\"}]}");
    Path worker=Path.of("../c2pa-worker/target/debug/c2pa-worker").toAbsolutePath().normalize();
-   execute(temporary,worker.toString(),"sign","probe.png","signed-probe.png","probe.json","chain.pem","key.pem");
-   Files.delete(temporary.resolve("probe.png"));Files.delete(temporary.resolve("probe.json"));Files.delete(temporary.resolve("signed-probe.png"));
+   Files.createDirectory(temporary.resolve("probe-output"));
+   execute(temporary,worker.toString(),"sign","probe.png","probe-output/signed-probe.png","probe.json","chain.pem","key.pem");
+   Files.delete(temporary.resolve("probe.png"));Files.delete(temporary.resolve("probe.json"));Files.delete(temporary.resolve("probe-output/signed-probe.png"));Files.delete(temporary.resolve("probe-output"));
    Path version=storage.resolve(UUID.randomUUID().toString());Files.move(temporary,version,StandardCopyOption.ATOMIC_MOVE);temporary=null;publish(version);return status();
   } catch(ResponseStatusException e){throw e;}catch(Exception e){throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Import failed. Supply one EC P-256 signing key with a valid C2PA-compatible certificate chain and matching password; the Rust worker must be available.");}
-  finally{Arrays.fill(password,'\0');Arrays.fill(bundle,(byte)0);if(temporary!=null && Files.exists(temporary)){try(var files=Files.list(temporary)){for(Path f:files.toList())Files.deleteIfExists(f);}Files.deleteIfExists(temporary);}}
+  finally{Arrays.fill(password,'\0');Arrays.fill(bundle,(byte)0);if(temporary!=null && Files.exists(temporary)){try(var files=Files.walk(temporary)){for(Path f:files.sorted(java.util.Comparator.reverseOrder()).toList())Files.deleteIfExists(f);}}}
  }
  private String pem(String label,byte[] bytes){return "-----BEGIN "+label+"-----\n"+Base64.getMimeEncoder(64,new byte[]{'\n'}).encodeToString(bytes)+"\n-----END "+label+"-----\n";}
  private Path generate() throws Exception {

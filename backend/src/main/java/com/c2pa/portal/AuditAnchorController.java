@@ -1,0 +1,40 @@
+package com.c2pa.portal;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.http.*;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.data.domain.PageRequest;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
+import java.util.*;
+@RestController @RequestMapping("/api/v1/admin/audit-storage")
+@io.swagger.v3.oas.annotations.security.SecurityRequirement(name="adminToken")
+public class AuditAnchorController {
+ public record Version(String id,ImmutableAuditStorage.Configuration configuration,Instant createdAt,Instant testedAt){}
+ public record State(Long revision,Version draft,Version active){}
+ public record Draft(Long revision,ImmutableAuditStorage.Configuration configuration){}
+ public record Selection(Long revision,String versionId,boolean acknowledgeComplianceRetention){}
+ public record Queue(boolean acknowledgeComplianceRetention){}
+ public record Retry(Long revision){}
+ public record Delivery(String id,Long revision,String state,int attempts,Instant createdAt,Instant nextAttemptAt,AuditIntegrityController.Checkpoint checkpoint,ImmutableAuditStorage.Receipt receipt){}
+ private final AuditAnchorSettingsRepository settings;private final AuditAnchorVersionRepository versions;private final AuditAnchorDeliveryRepository deliveries;private final ImmutableAuditStorage storage;private final AuditAnchors anchors;private final ObjectMapper mapper;private final WorkspaceRepository workspaces;private final AuditService audit;
+ public AuditAnchorController(AuditAnchorSettingsRepository settings,AuditAnchorVersionRepository versions,AuditAnchorDeliveryRepository deliveries,ImmutableAuditStorage storage,AuditAnchors anchors,ObjectMapper mapper,WorkspaceRepository workspaces,AuditService audit){this.settings=settings;this.versions=versions;this.deliveries=deliveries;this.storage=storage;this.anchors=anchors;this.mapper=mapper;this.workspaces=workspaces;this.audit=audit;}
+ private AuditAnchorSettings settings(){return settings.findById(WorkspaceContext.id()).orElseGet(()->{var s=new AuditAnchorSettings();s.id=WorkspaceContext.id();return settings.saveAndFlush(s);});}
+ private AuditAnchorVersion version(String id){return versions.findById(Objects.requireNonNullElse(id,"")).filter(v->v.workspaceId.equals(WorkspaceContext.id())).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND));}
+ private Version view(AuditAnchorVersion v)throws Exception{return new Version(v.id,storage.decode(v.configuration),v.createdAt,v.testedAt);}
+ private State state(AuditAnchorSettings s)throws Exception{return new State(s.revision,s.draftVersion==null?null:view(version(s.draftVersion)),s.activeVersion==null?null:view(version(s.activeVersion)));}
+ private AuditAnchorSettings current(Long revision){workspaces.lockById(WorkspaceContext.id()).orElseThrow();var s=settings();if(!Objects.equals(s.revision,revision))throw new ResponseStatusException(HttpStatus.CONFLICT,"Audit storage configuration changed");return s;}
+ private void acknowledge(boolean acknowledged){if(!acknowledged)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Acknowledge irreversible COMPLIANCE retention, including retained test objects");}
+ @GetMapping @Transactional public State get()throws Exception{return state(settings());}
+ @PutMapping("/draft") @Transactional public State save(@RequestBody Draft request)throws Exception{var s=current(request.revision());var v=new AuditAnchorVersion();v.id=UUID.randomUUID().toString();v.workspaceId=WorkspaceContext.id();v.configuration=mapper.writeValueAsString(storage.validate(v.workspaceId,request.configuration()));v.createdAt=Instant.now();versions.saveAndFlush(v);s.draftVersion=v.id;settings.saveAndFlush(s);audit.record("AUDIT_STORAGE_DRAFT_SAVED",v.id);return state(s);}
+ @GetMapping("/history") public List<Version> history(@RequestParam(defaultValue="0") int page)throws Exception{if(page<0 || page>10000)throw new ResponseStatusException(HttpStatus.BAD_REQUEST);var result=new ArrayList<Version>();for(var v:versions.findByWorkspaceIdOrderByCreatedAtDesc(WorkspaceContext.id(),PageRequest.of(page,50)))result.add(view(v));return result;}
+ @PostMapping("/test") @Transactional public State test(@RequestBody Selection request)throws Exception{acknowledge(request.acknowledgeComplianceRetention());var v=version(request.versionId());var s=current(request.revision());try{storage.test(v.workspaceId,storage.decode(v.configuration));}catch(Exception e){throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"Audit storage test failed; verify TLS, credentials, bucket versioning, Object Lock and COMPLIANCE retention. A test object may already be retained.");}v.testedAt=Instant.now();versions.saveAndFlush(v);audit.record("AUDIT_STORAGE_TESTED",v.id);return state(s);}
+ @PostMapping("/activate") @Transactional public State activate(@RequestBody Selection request)throws Exception{acknowledge(request.acknowledgeComplianceRetention());var v=version(request.versionId());var s=current(request.revision());if(v.testedAt==null || v.testedAt.isBefore(Instant.now().minusSeconds(86400)))throw new ResponseStatusException(HttpStatus.CONFLICT,"Test this version first");var c=storage.decode(v.configuration);s.activeVersion=v.id;s.draftVersion=v.id;s.nextCheckpointAt=c.enabled()?Instant.now().plusSeconds(c.intervalMinutes()*60L):null;settings.saveAndFlush(s);audit.record("AUDIT_STORAGE_ACTIVATED",v.id);return state(s);}
+ private AuditAnchorDelivery delivery(String id){return deliveries.findById(id).filter(d->d.workspaceId.equals(WorkspaceContext.id())).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND));}
+ private Delivery view(AuditAnchorDelivery d)throws Exception{return new Delivery(d.id,d.revision,d.state,d.attempts,d.createdAt,d.nextAttemptAt,mapper.readValue(d.checkpoint,AuditIntegrityController.Checkpoint.class),d.receipt==null?null:mapper.readValue(d.receipt,ImmutableAuditStorage.Receipt.class));}
+ @GetMapping("/deliveries") public List<Delivery> deliveries(@RequestParam(defaultValue="0") int page)throws Exception{if(page<0 || page>10000)throw new ResponseStatusException(HttpStatus.BAD_REQUEST);var result=new ArrayList<Delivery>();for(var d:deliveries.findByWorkspaceIdOrderByCreatedAtDesc(WorkspaceContext.id(),PageRequest.of(page,50)))result.add(view(d));return result;}
+ @PostMapping("/checkpoint") public Delivery queue(@RequestBody Queue request)throws Exception{acknowledge(request.acknowledgeComplianceRetention());return view(anchors.queue(WorkspaceContext.id(),false));}
+ @PostMapping("/deliveries/{id}/retry") public Delivery retry(@PathVariable String id,@RequestBody Retry request)throws Exception{anchors.retry(WorkspaceContext.id(),id,request.revision());return view(delivery(id));}
+ @GetMapping("/deliveries/{id}/receipt") public ResponseEntity<byte[]> receipt(@PathVariable String id)throws Exception{var d=delivery(id);if(!d.state.equals("STORED"))throw new ResponseStatusException(HttpStatus.CONFLICT,"No confirmed receipt is available");return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename=\"audit-storage-receipt.json\"").body(d.receipt.getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+ @PostMapping("/deliveries/{id}/verify") public Map<String,Object> verify(@PathVariable String id)throws Exception{var d=delivery(id);if(!d.state.equals("STORED"))throw new ResponseStatusException(HttpStatus.CONFLICT,"Checkpoint has not been stored");try{storage.verify(d.workspaceId,storage.decode(d.configuration),mapper.readValue(d.receipt,ImmutableAuditStorage.Receipt.class),d.checkpoint);}catch(Exception e){throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"External checkpoint verification failed; check provider access, protected version, retention and payload");}return Map.of("verified",true,"id",d.id,"message","Stored version, payload hash and COMPLIANCE retention verified against the recorded receipt. Keep a receipt independently of this database.");}
+}

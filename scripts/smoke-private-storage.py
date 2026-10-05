@@ -22,6 +22,8 @@ import zlib
 import select
 import shlex
 import runpy
+import urllib.parse
+import datetime
 
 ROOT = Path(__file__).resolve().parent.parent
 ACCESS, SECRET = secrets.token_hex(16), secrets.token_hex(32)
@@ -46,7 +48,8 @@ def authenticated(request):
     headers = ''.join(name + ':' + ' '.join(request.headers[name].split()) + '\n'
                       for name in fields['SignedHeaders'].split(';'))
     path, _, query = request.path.partition('?')
-    canonical = '\n'.join([request.command, path, query, headers,
+    canonical_query = '&'.join(urllib.parse.quote(k, safe='-_.~') + '=' + urllib.parse.quote(v, safe='-_.~') for k, v in sorted(urllib.parse.parse_qsl(query, keep_blank_values=True)))
+    canonical = '\n'.join([request.command, path, canonical_query, headers,
                             fields['SignedHeaders'], request.headers['x-amz-content-sha256']])
     signing = '\n'.join(['AWS4-HMAC-SHA256', request.headers['x-amz-date'],
                          '/'.join(scope[1:]), digest(canonical.encode())])
@@ -100,6 +103,49 @@ class S3(http.server.BaseHTTPRequestHandler):
         except Exception:
             self.send_response(500); self.end_headers()
 
+    do_PUT = do_GET = do_DELETE = handle_object
+
+LOCKED_OBJECTS = {}
+LOCK_MODE = 'valid'
+class ObjectLock(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *_): pass
+    def handle_object(self):
+        if not authenticated(self):
+            self.send_response(403); self.end_headers(); return
+        path, _, query = self.path.partition('?')
+        parameters = urllib.parse.parse_qs(query, keep_blank_values=True)
+        if self.command == 'GET' and 'object-lock' in parameters:
+            self.xml('<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>'); return
+        if self.command == 'GET' and 'versioning' in parameters:
+            self.xml('<VersioningConfiguration><Status>' + ('Suspended' if LOCK_MODE == 'no_versioning' else 'Enabled') + '</Status></VersioningConfiguration>'); return
+        if self.command == 'PUT':
+            body = self.rfile.read(int(self.headers['Content-Length']))
+            if 'aws-chunked' in self.headers.get('Content-Encoding', ''):
+                decoded = b''
+                while body:
+                    size, _, body = body.partition(b'\r\n'); length = int(size.split(b';')[0], 16)
+                    if not length: break
+                    decoded += body[:length]; body = body[length + 2:]
+                body = decoded
+            assert self.headers['x-amz-object-lock-mode'] == 'COMPLIANCE'
+            assert hmac.compare_digest(self.headers['x-amz-checksum-sha256'], base64.b64encode(hashlib.sha256(body).digest()).decode())
+            version = secrets.token_hex(16)
+            LOCKED_OBJECTS[(path, version)] = {'body': body, 'until': self.headers['x-amz-object-lock-retain-until-date']}
+            self.send_response(200); self.send_header('x-amz-version-id', version); self.end_headers(); return
+        version = parameters.get('versionId', [''])[0]
+        found = LOCKED_OBJECTS.get((path, version))
+        if found is None: self.send_response(404); self.end_headers(); return
+        if self.command == 'GET' and 'retention' in parameters:
+            self.xml('<Retention><Mode>' + ('GOVERNANCE' if LOCK_MODE == 'wrong_retention' else 'COMPLIANCE') + '</Mode><RetainUntilDate>' + found['until'] + '</RetainUntilDate></Retention>'); return
+        if self.command == 'DELETE':
+            if LOCK_MODE == 'delete_allowed':
+                del LOCKED_OBJECTS[(path, version)]; self.send_response(204); self.end_headers(); return
+            self.send_response(403); self.send_header('Content-Type', 'application/xml'); self.end_headers(); self.wfile.write(b'<Error><Code>AccessDenied</Code><Message>Protected version</Message></Error>'); return
+        if self.command == 'GET':
+            body = found['body'] if LOCK_MODE != 'wrong_payload' else b'{}'
+            self.send_response(200); self.send_header('Content-Length', str(len(body))); self.send_header('x-amz-version-id', version); self.end_headers(); self.wfile.write(body)
+    def xml(self, value):
+        body = value.encode(); self.send_response(200); self.send_header('Content-Type', 'application/xml'); self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body)
     do_PUT = do_GET = do_DELETE = handle_object
 
 def timestamp_fixture(folder):
@@ -184,7 +230,8 @@ def initialize_token(command, environment, so_pin, user_pin):
 def chunk(kind, data):
     return struct.pack('!I', len(data)) + kind + data + struct.pack('!I', zlib.crc32(kind + data))
 
-def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, formats=False):
+def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, formats=False, audit_lock=False):
+    global LOCK_MODE
     global TSA_MODE
     assert (ROOT / 'backend/target/portal-api-0.1.0.jar').is_file(), 'Build the Java API first'
     assert (ROOT / 'c2pa-worker/target/debug/c2pa-worker').is_file(), 'Build the Rust worker first'
@@ -196,6 +243,8 @@ def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, 
         base = f'http://127.0.0.1:{port}/api/v1'
         fixture = http.server.ThreadingHTTPServer(('127.0.0.1', 0), S3)
         threading.Thread(target=fixture.serve_forever, daemon=True).start()
+        lock_server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), ObjectLock) if audit_lock else None
+        if lock_server: threading.Thread(target=lock_server.serve_forever, daemon=True).start()
         tsa_server, tsa_anchor = timestamp_fixture(sandbox / "tsa") if timestamps else (None, None)
         application = None
         log = (sandbox / 'application.log').open('wb')
@@ -549,6 +598,46 @@ def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, 
             data, headers = multipart({'password': backup_password, 'acknowledgeRestore': 'true'}, 'key.backup', backup)
             assert call('/admin/security/restore', data=data, extra=headers)['available']
             assert call(f'/jobs/{job["id"]}/download', raw=True) == signed
+            if audit_lock:
+                anchor_state = call('/admin/audit-storage')
+                anchor_config = {'enabled': True, 'storage': {**settings, 'endpoint': f'http://127.0.0.1:{lock_server.server_port}', 'bucket': 'portal-audits'}, 'retentionDays': 30, 'intervalMinutes': 60}
+                anchor_state = call('/admin/audit-storage/draft', {'revision': anchor_state['revision'], 'configuration': anchor_config}, method='PUT')
+                anchor_selection = {'revision': anchor_state['revision'], 'versionId': anchor_state['draft']['id'], 'acknowledgeComplianceRetention': True}
+                denied(lambda: call('/admin/audit-storage/activate', anchor_selection), 409)
+                denied(lambda: call('/admin/audit-storage/test', {**anchor_selection, 'acknowledgeComplianceRetention': False}), 400)
+                denied(lambda: call('/admin/audit-storage/test', anchor_selection, workspace=workspace), 404)
+                for mode in ['no_versioning', 'wrong_retention', 'delete_allowed', 'wrong_payload']:
+                    LOCK_MODE = mode
+                    denied(lambda: call('/admin/audit-storage/test', anchor_selection), 502)
+                    assert call('/admin/audit-storage')['draft']['testedAt'] is None
+                LOCK_MODE = 'valid'
+                call('/admin/audit-storage/test', anchor_selection)
+                anchor_state = call('/admin/audit-storage/activate', anchor_selection)
+                denied(lambda: call('/admin/audit-storage/checkpoint', {'acknowledgeComplianceRetention': False}), 400)
+                anchor_delivery = call('/admin/audit-storage/checkpoint', {'acknowledgeComplianceRetention': True})
+                assert anchor_delivery['state'] == 'PENDING'
+                # Disabling future writes must not redirect or cancel a captured checkpoint.
+                anchor_state = call('/admin/audit-storage')
+                anchor_state = call('/admin/audit-storage/draft', {'revision': anchor_state['revision'], 'configuration': {'enabled': False}}, method='PUT')
+                disable = {'revision': anchor_state['revision'], 'versionId': anchor_state['draft']['id'], 'acknowledgeComplianceRetention': True}
+                call('/admin/audit-storage/test', disable); call('/admin/audit-storage/activate', disable)
+                for _ in range(80):
+                    row = next(d for d in call('/admin/audit-storage/deliveries') if d['id'] == anchor_delivery['id'])
+                    if row['state'] == 'STORED': break
+                    time.sleep(.25)
+                assert row['state'] == 'STORED' and row['receipt']['bucket'] == 'portal-audits'
+                receipt = call('/admin/audit-storage/deliveries/' + row['id'] + '/receipt')
+                assert receipt['format'] == 'c2pa-audit-object-lock-v1' and receipt['versionId']
+                assert call('/admin/audit-integrity/checkpoint/verify', receipt['checkpoint'])['valid']
+                assert call('/admin/audit-storage/deliveries/' + row['id'] + '/verify', {})['verified']
+                denied(lambda: call('/admin/audit-storage/deliveries/' + row['id'] + '/verify', {}, workspace=workspace), 404)
+                LOCK_MODE = 'wrong_payload'
+                denied(lambda: call('/admin/audit-storage/deliveries/' + row['id'] + '/verify', {}), 502)
+                LOCK_MODE = 'valid'
+                stop(); start()
+                assert call('/admin/audit-storage/deliveries/' + row['id'] + '/verify', {})['verified']
+                assert call('/admin/audit-storage/deliveries/' + row['id'] + '/receipt') == receipt
+                print('S3 Object Lock: version-specific receipts, COMPLIANCE retention, deletion refusal, provider snapshots, negative-provider checks, workspace isolation and restart persistence passed.', flush=True)
             if formats:
                 helpers = runpy.run_path(str(ROOT / 'scripts/smoke-formats.py'))
                 profile = call('/admin/configuration')
@@ -584,6 +673,7 @@ def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, 
             print(('PostgreSQL'  if postgres_bin else 'H2') + (': PKCS#11/non-exportable SoftHSM signing, ' if softhsm_dir else ': ') + ('RFC 3161 timestamps/snapshots, ' if timestamps else '') + 'worker resource limits/sandbox capability, private trust policy/snapshots, approved signing choices/rotation/withdrawal, MFA, one-time account recovery, migrations, leased native C2PA job, private storage, SigV4, scoped API-key signing/revocation, provider snapshots, notifications, HMAC webhooks, audit checkpoint, workspace isolation, restart persistence and encryption-key recovery passed.')
         finally:
             stop(); fixture.shutdown(); fixture.server_close()
+            if lock_server is not None: lock_server.shutdown(); lock_server.server_close()
             if tsa_server is not None: tsa_server.shutdown(); tsa_server.server_close()
             if postgres is not None:
                 postgres.terminate(); postgres.wait(15)
@@ -597,5 +687,6 @@ if __name__ == '__main__':
     parser.add_argument('--timestamps', action='store_true', help='Test real RFC 3161 OpenSSL timestamps against a private disposable TSA')
     parser.add_argument('--namespace', action='store_true', help='Require real network/filesystem namespace isolation for native signing and inspection')
     parser.add_argument('--formats', action='store_true', help='Exercise all nine embedded formats, re-signing and tamper detection with the selected identity')
+    parser.add_argument('--audit-lock', action='store_true', help='Test protected audit checkpoint storage with an independent S3 Object Lock protocol fixture')
     args = parser.parse_args()
-    run(args.postgres_bin, args.softhsm_dir, args.timestamps, args.namespace, args.formats)
+    run(args.postgres_bin, args.softhsm_dir, args.timestamps, args.namespace, args.formats, args.audit_lock)
