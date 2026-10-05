@@ -1,0 +1,165 @@
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  font:
+    16px system-ui,
+    sans-serif;
+  background: #f5f7fa;
+  color: #182638;
+}
+.shell {
+  display: flex;
+  min-height: 100vh;
+}
+aside {
+  width: 270px;
+  background: #142c32;
+  color: #d9ece8;
+  padding: 36px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.brand {
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+aside p {
+  color: #a9c3bd;
+}
+nav {
+  display: grid;
+  gap: 24px;
+  margin: 36px 0;
+  line-height: 1.6;
+}
+nav span {
+  color: #a9c3bd;
+}
+a {
+  color: inherit;
+}
+main {
+  width: min(920px, 100%);
+  padding: 48px;
+}
+header span {
+  font-size: 12px;
+  letter-spacing: 0.15em;
+  color: #5b726e;
+}
+h1 {
+  font-size: 38px;
+  letter-spacing: -0.04em;
+  margin: 16px 0;
+}
+p {
+  line-height: 1.7;
+  color: #587070;
+}
+section {
+  background: white;
+  border: 1px solid #dce5e5;
+  border-radius: 14px;
+  padding: 28px;
+  margin-top: 24px;
+}
+h2 {
+  font-size: 20px;
+  margin-top: 0;
+}
+label {
+  display: grid;
+  gap: 9px;
+  margin: 20px 0;
+  font-weight: 600;
+}
+input:not([type="checkbox"]) {
+  padding: 12px;
+  border: 1px solid #b7c9c6;
+  border-radius: 7px;
+  font: inherit;
+  width: 100%;
+}
+fieldset {
+  border: 1px solid #dce5e5;
+  border-radius: 8px;
+  margin: 24px 0;
+}
+.check {
+  display: flex;
+  align-items: center;
+  font-weight: 400;
+  gap: 12px;
+}
+.actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 28px;
+}
+button {
+  background: #146d5c;
+  color: white;
+  border: 1px solid #146d5c;
+  padding: 12px 18px;
+  border-radius: 8px;
+  font: inherit;
+  cursor: pointer;
+}
+button.secondary {
+  background: white;
+  color: #146d5c;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.notice {
+  background: #fff6dd;
+  border: 1px solid #eed99d;
+  border-radius: 8px;
+  padding: 16px;
+  line-height: 1.6;
+  margin-top: 24px;
+}
+.section-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.badge {
+  font-size: 12px;
+  color: #146d5c;
+}
+@media (max-width: 760px) {
+  .shell {
+    display: block;
+  }
+  aside {
+    width: 100%;
+    padding: 20px;
+  }
+  nav {
+    display: none;
+  }
+  main {
+    padding: 24px;
+  }
+  h1 {
+    font-size: 30px;
+  }
+}
+
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 400px;
+  overflow: auto;
+  background: #f5f7fa;
+  padding: 16px;
+  border-radius: 8px;
+  font-size: 12px;
+}
