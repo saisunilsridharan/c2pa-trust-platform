@@ -778,7 +778,55 @@ def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, 
                 assert after_pause['state'] == 'PAUSED' and after_pause['currentChoiceId'] == renewed_choice['id']
                 assert next(c for c in call('/admin/signing-options') if c['id'] == renewed_choice['id'])['enabled']
                 assert call(f'/jobs/{job["id"]}/download', raw=True) == signed
+                crl_helper = runpy.run_path(str(ROOT / 'scripts/private-ca-fixture.py'))['crl_fixture']
+                chain_path = backend / '.local/hardware-identities/1' / plan['lastIdentityId'] / 'chain.pem'
+                empty_crl = crl_helper(sandbox / 'private-ca')
+                revoked_crl = crl_helper(sandbox / 'private-ca', chain_path)
+                expired_crl = crl_helper(sandbox / 'private-ca', expired=True)
+                revocation = call('/admin/revocation')
+                revocation_config = {'enabled': True, 'requireCoveredSigning': True, 'issuerCertificatesPem': ca_anchor, 'crlsPem': empty_crl}
+                denied(lambda: call('/admin/revocation/draft', {'revision': revocation['revision'], 'configuration': {**revocation_config, 'crlsPem': expired_crl}}, method='PUT'), 400)
+                revocation = call('/admin/revocation/draft', {'revision': revocation['revision'], 'configuration': revocation_config}, method='PUT')
+                selection = {'revision': revocation['revision'], 'versionId': revocation['draft']['id'], 'acknowledgeSigningEnforcement': True}
+                denied(lambda: call('/admin/revocation/activate', selection), 409)
+                revocation_test = {**selection, 'signingChoiceId': renewed_choice['id'], 'expectRevoked': False}
+                denied(lambda: call('/admin/revocation/test', revocation_test, workspace=workspace), 404)
+                call('/admin/revocation/test', revocation_test)
+                denied(lambda: call('/admin/revocation/activate', {**selection, 'acknowledgeSigningEnforcement': False}), 400)
+                call('/admin/revocation/activate', selection)
+                data, headers = multipart(renewed_fields, 'crl-allowed.png', png)
+                assert call('/signing', data=data, extra=headers, raw=True)
+                revocation = call('/admin/revocation/draft', {'revision': call('/admin/revocation')['revision'], 'configuration': {**revocation_config, 'crlsPem': revoked_crl}}, method='PUT')
+                selection = {'revision': revocation['revision'], 'versionId': revocation['draft']['id'], 'acknowledgeSigningEnforcement': True}
+                denied(lambda: call('/admin/revocation/test', {**selection, 'signingChoiceId': renewed_choice['id'], 'expectRevoked': False}), 400)
+                call('/admin/revocation/test', {**selection, 'signingChoiceId': renewed_choice['id'], 'expectRevoked': True})
+                revocation = call('/admin/revocation/activate', selection)
+                assert revocation['active']['summary']['revokedEntries'] == 1
+                scoped = call('/auth/api-keys', {'label': 'Revocation scope fixture', 'scopes': ['READ', 'SIGN', 'VERIFY'], 'days': 1})
+                assert call('/portal/revocation', extra={'X-Admin-Token': scoped['token']})['enabled']
+                assert 'issuerCertificatesPem' not in call('/portal/revocation', extra={'X-Admin-Token': scoped['token']})
+                denied(lambda: call('/admin/revocation', extra={'X-Admin-Token': scoped['token']}), 403)
+                denied(lambda: call('/admin/revocation/draft', {'revision': revocation['revision'], 'configuration': {'enabled': False}}, method='PUT', extra={'X-Admin-Token': scoped['token']}), 403)
+                call('/auth/api-keys/' + scoped['key']['id'], method='DELETE')
+                denied(lambda: call('/signing', data=data, extra=headers), 409)
+                blocked_job = call('/jobs', data=data, extra={**headers, 'Idempotency-Key': secrets.token_hex(16)})
+                for _ in range(150):
+                    blocked_job = next(j for j in call('/jobs') if j['id'] == blocked_job['id'])
+                    if blocked_job['state'] == 'FAILED': break
+                    assert blocked_job['state'] != 'COMPLETED', 'Revoked certificate published a job output'
+                    time.sleep(.2)
+                assert blocked_job['state'] == 'FAILED'
+                denied(lambda: call('/jobs/' + blocked_job['id'] + '/download', raw=True), 409)
+                assert call('/admin/revocation', workspace=workspace)['active'] is None
+                assert call(f'/jobs/{job["id"]}/download', raw=True) == signed
                 stop(); start()
+                assert call('/admin/revocation')['active']['id'] == revocation['active']['id']
+                denied(lambda: call('/signing', data=data, extra=headers), 409)
+                revocation = call('/admin/revocation/draft', {'revision': revocation['revision'], 'configuration': {'enabled': False}}, method='PUT')
+                selection = {'revision': revocation['revision'], 'versionId': revocation['draft']['id'], 'acknowledgeSigningEnforcement': True}
+                call('/admin/revocation/test', selection); call('/admin/revocation/activate', selection)
+                assert call('/signing', data=data, extra=headers, raw=True)
+                print('Private CRL revocation: OpenSSL signature verification, stale CRL rejection, expected-outcome tests, activation acknowledgment, real HSM allow/revoke, revoked queued job/output rejection, workspace isolation, old-output preservation, restart persistence and UI disable passed.', flush=True)
                 assert next(p for p in call('/admin/private-ca/renewals') if p['id'] == plan['id'])['state'] == 'PAUSED'
                 assert call('/admin/private-ca')['active']['id'] == ca_state['active']['id']
                 assert call('/admin/private-ca/history')[0]['testedAt']

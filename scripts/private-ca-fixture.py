@@ -112,3 +112,29 @@ def fixture(folder):
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), CA)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, (folder / 'root.pem').read_text(), key, modes
+
+
+def crl_fixture(folder, revoked_certificate=None, expired=False):
+    """Generate an independently verified complete CRL using the disposable CA."""
+    import tempfile
+    folder = Path(folder).resolve()
+    with tempfile.TemporaryDirectory(prefix='crl-', dir=folder) as temporary:
+        working = Path(temporary)
+        (working / 'index').write_text('')
+        (working / 'serial').write_text('1000\n')
+        (working / 'number').write_text('1000\n')
+        (working / 'new').mkdir()
+        config = working / 'ca.conf'
+        config.write_text(f'[ca]\ndefault_ca=issuer\n[issuer]\ndatabase={working}/index\nserial={working}/serial\ncrlnumber={working}/number\nnew_certs_dir={working}/new\ncertificate={folder}/root.pem\nprivate_key={folder}/root.key\ndefault_md=sha256\ndefault_days=2\ndefault_crl_days=1\npolicy=subject\n[subject]\ncommonName=supplied\n')
+        def run(*args):
+            result = subprocess.run(['openssl', *args], capture_output=True, timeout=15)
+            assert result.returncode == 0, 'Disposable CRL OpenSSL operation failed; output omitted'
+            return result
+        if revoked_certificate is not None:
+            run('ca', '-config', str(config), '-revoke', str(revoked_certificate), '-batch')
+        args = ['ca', '-config', str(config), '-gencrl', '-out', str(working / 'crl.pem'), '-batch']
+        if expired: args += ['-crl_lastupdate', '20200101000000Z', '-crl_nextupdate', '20200102000000Z']
+        run(*args)
+        verification = run('crl', '-in', str(working / 'crl.pem'), '-verify', '-CAfile', str(folder / 'root.pem'))
+        assert b'verify OK' in verification.stdout + verification.stderr
+        return (working / 'crl.pem').read_text()

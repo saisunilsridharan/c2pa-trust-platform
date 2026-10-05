@@ -1,3 +1,4 @@
+import { RevocationStatus } from "./RevocationPanel";
 import { TimestampStatus } from "./TimestampsPanel";
 import { TrustPolicyStatus } from "./TrustPolicyPanel";
 import {
@@ -132,6 +133,7 @@ export default function JobsPanel({
     <section>
       <h2>Saved assets & signing jobs</h2>
       <TrustPolicyStatus token={token} />
+      <RevocationStatus token={token} />
       <TimestampStatus token={token} />
       {admin && operations && (
         <p>

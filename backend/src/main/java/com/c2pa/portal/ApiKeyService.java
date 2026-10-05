@@ -13,7 +13,7 @@ public class ApiKeyService {
  public Optional<Principal> authenticate(String token){if(token==null || !token.matches("c2pa_key_[a-f0-9]{64}"))return Optional.empty();return keys.findByTokenHash(AccountService.hash(token)).filter(k->!k.revoked && k.expiresAt.isAfter(Instant.now())).flatMap(k->users.findById(k.userId).filter(u->u.enabled && !u.passwordChangeRequired).map(u->new Principal(u,k)));}
  public static boolean permitted(PortalApiKey key,String method,String path){
   Set<String> scopes=Set.of(key.scopes.split(","));
-  if(method.equals("GET") && (path.startsWith("/api/v1/jobs") || Set.of("/api/v1/portal/configuration","/api/v1/portal/signing-options","/api/v1/portal/trust-policy","/api/v1/portal/timestamps","/api/v1/portal/capabilities").contains(path)))return scopes.contains("READ");
+  if(method.equals("GET") && (path.startsWith("/api/v1/jobs") || Set.of("/api/v1/portal/configuration","/api/v1/portal/signing-options","/api/v1/portal/trust-policy","/api/v1/portal/revocation","/api/v1/portal/timestamps","/api/v1/portal/capabilities").contains(path)))return scopes.contains("READ");
   if(method.equals("POST") && path.equals("/api/v1/verification"))return scopes.contains("VERIFY");
   if(method.equals("POST") && (path.equals("/api/v1/signing") || path.equals("/api/v1/jobs") || path.matches("/api/v1/jobs/[a-f0-9-]{36}/retry")))return scopes.contains("SIGN");
   return false;

@@ -1,3 +1,4 @@
+import RevocationPanel from "./RevocationPanel";
 import CertificateRenewalPanel from "./CertificateRenewalPanel";
 import PrivateCaPanel from "./PrivateCaPanel";
 import { authenticationRetry } from "./authenticationRetry";
@@ -487,6 +488,7 @@ function App() {
                   <CertificateRenewalPanel token={token} />
                   <AuditStoragePanel token={token} />
                   <TrustPolicyPanel token={token} />
+                  <RevocationPanel token={token} />
                   <HardwareIdentitiesPanel
                     token={token}
                     profileRevision={state.activeRevision}

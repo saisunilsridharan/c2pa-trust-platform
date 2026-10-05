@@ -53,7 +53,7 @@ public class AdminAuthentication extends OncePerRequestFilter {
   if(!platformAdmin && (path.startsWith("/api/v1/admin/users") || path.equals("/api/v1/admin/sessions") || path.startsWith("/api/v1/admin/security") || path.startsWith("/api/v1/admin/authentication"))){reject(response,403,"Platform administrator required");return;}
   request.setAttribute("portal.workspaceId",workspaceId);request.setAttribute("portal.platformAdministrator",platformAdmin);
 
-  boolean ordinary=java.util.Set.of("/api/v1/auth/me","/api/v1/auth/logout","/api/v1/auth/password","/api/v1/portal/configuration","/api/v1/portal/signing-options","/api/v1/portal/trust-policy","/api/v1/portal/timestamps","/api/v1/portal/capabilities","/api/v1/verification").contains(path) || (path.equals("/api/v1/signing") && role.equals("SIGNER"));
+  boolean ordinary=java.util.Set.of("/api/v1/auth/me","/api/v1/auth/logout","/api/v1/auth/password","/api/v1/portal/configuration","/api/v1/portal/signing-options","/api/v1/portal/trust-policy","/api/v1/portal/revocation","/api/v1/portal/timestamps","/api/v1/portal/capabilities","/api/v1/verification").contains(path) || (path.equals("/api/v1/signing") && role.equals("SIGNER"));
   if(path.equals("/api/v1/workspaces") || path.startsWith("/api/v1/workspaces/"))ordinary=true;
   if(path.equals("/api/v1/auth/api-keys") || path.startsWith("/api/v1/auth/api-keys/"))ordinary=true;
   if(factorRoute)ordinary=true;

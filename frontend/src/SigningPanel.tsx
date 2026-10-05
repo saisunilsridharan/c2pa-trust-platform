@@ -1,3 +1,4 @@
+import { RevocationStatus } from "./RevocationPanel";
 import { TimestampStatus } from "./TimestampsPanel";
 import { TrustPolicyStatus } from "./TrustPolicyPanel";
 import {
@@ -56,6 +57,7 @@ export default function SigningPanel({
     <section>
       <h2>Sign content</h2>
       <TrustPolicyStatus token={token} />
+      <RevocationStatus token={token} />
       <TimestampStatus token={token} />
       <SigningChoiceSelector
         token={token}
@@ -218,7 +220,7 @@ export default function SigningPanel({
             });
             if (!response.ok)
               throw new Error(
-                `Signing failed (${response.status}). Check content, profile and certificate.`,
+                `Signing failed (${response.status}). Check content, profile, certificate and current revocation policy.`,
               );
             const url = URL.createObjectURL(await response.blob());
             const link = document.createElement("a");
