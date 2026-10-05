@@ -1,3 +1,4 @@
+import HardwareIdentitiesPanel from "./HardwareIdentitiesPanel";
 import SigningChoicesPanel from "./SigningChoicesPanel";
 import { portalFetch as connectionFetch, workspaceFetch } from "./portalFetch";
 import React, { useState } from "react";
@@ -473,6 +474,10 @@ function App() {
                   <StorageProvidersPanel token={token} />
                   <WebhooksPanel token={token} />
                   <ProcessingPanel token={token} />
+                  <HardwareIdentitiesPanel
+                    token={token}
+                    profileRevision={state.activeRevision}
+                  />
                   <SigningChoicesPanel
                     token={token}
                     profileRevision={state.activeRevision}

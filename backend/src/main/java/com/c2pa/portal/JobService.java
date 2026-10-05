@@ -19,8 +19,8 @@ public class JobService {
  private final Path storage=Path.of(".local/assets").toAbsolutePath();
  private final StorageVersionRepository storageVersions;private final PrivateObjectStorage objects;
  private final JobCompletion completion;
- private final SigningChoices choices;private final JobLeases leases;private final ProcessingRepository processing;
- public JobService(JobRepository jobs,ConfigurationRepository configs,DevelopmentIdentity identity,ObjectMapper mapper,AuditService audit,StorageRepository retention,StorageVersionRepository storageVersions,PrivateObjectStorage objects,JobCompletion completion,JobLeases leases,ProcessingRepository processing,SigningChoices choices){this.choices=choices;this.jobs=jobs;this.configs=configs;this.identity=identity;this.mapper=mapper;this.audit=audit;this.retention=retention;this.storageVersions=storageVersions;this.objects=objects;this.completion=completion;this.leases=leases;this.processing=processing;}
+ private final WorkerExecution execution;private final SigningChoices choices;private final JobLeases leases;private final ProcessingRepository processing;
+ public JobService(JobRepository jobs,ConfigurationRepository configs,DevelopmentIdentity identity,ObjectMapper mapper,AuditService audit,StorageRepository retention,StorageVersionRepository storageVersions,PrivateObjectStorage objects,JobCompletion completion,JobLeases leases,ProcessingRepository processing,SigningChoices choices,WorkerExecution execution){this.execution=execution;this.choices=choices;this.jobs=jobs;this.configs=configs;this.identity=identity;this.mapper=mapper;this.audit=audit;this.retention=retention;this.storageVersions=storageVersions;this.objects=objects;this.completion=completion;this.leases=leases;this.processing=processing;}
  public Path directory(String id){UUID.fromString(id);return storage.resolve(id);}
  public synchronized SigningJob submit(MultipartFile file,String creator,String title,String ai,String owner,String requestId,Long expectedProfileRevision,String expectedIdentityFingerprint) throws Exception {
   return submit(file,creator,title,ai,owner,requestId,expectedProfileRevision,expectedIdentityFingerprint,null,null);
@@ -62,9 +62,8 @@ public class JobService {
   try {
    Files.createDirectories(directory);Path output=directory.resolve("signed"+extension(job));
    Path worker=Path.of("../c2pa-worker/target/debug/c2pa-worker").toAbsolutePath().normalize();
-   process=new ProcessBuilder(worker.toString(),"sign",source.resolve("original"+extension(job)).toString(),output.toString(),source.resolve("manifest.json").toString(),job.certificatePath,job.keyPath).redirectOutput(directory.resolve("report.json").toFile()).redirectError(directory.resolve("worker-error.log").toFile()).start();
-   if(!process.waitFor(job.workerTimeoutSeconds,TimeUnit.SECONDS))throw new IllegalStateException("Processing timed out");
-   if(process.exitValue()!=0 || !Files.isRegularFile(output))throw new IllegalStateException("Content or certificate could not be signed");
+   int exit=execution.sign(job.workspaceId,worker,source.resolve("original"+extension(job)),output,source.resolve("manifest.json"),Path.of(job.certificatePath),job.keyPath,directory.resolve("report.json"),directory.resolve("worker-error.log"),job.workerTimeoutSeconds);
+   if(exit!=0 || !Files.isRegularFile(output))throw new IllegalStateException("Content or certificate could not be signed");
    objects.write(job,"signed"+extension(job),output);objects.write(job,"report.json",directory.resolve("report.json"));
    job.state="COMPLETED";job.error=null;
   } catch(Exception e){job.state="FAILED";job.error="Signing failed. Check content, worker readiness and certificate validity.";}

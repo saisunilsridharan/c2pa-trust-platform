@@ -9,12 +9,12 @@ import java.util.*;
 import java.time.Instant;
 @RestController @io.swagger.v3.oas.annotations.security.SecurityRequirement(name="adminToken")
 public class SigningOptionsController {
- public record View(String id,Long revision,String label,ConfigurationController.Settings settings,Long profileRevision,String fingerprint,boolean development,boolean enabled,boolean available,Instant createdAt){}
+ public record View(String id,Long revision,String label,ConfigurationController.Settings settings,Long profileRevision,String fingerprint,boolean development,boolean enabled,boolean available,Instant createdAt,String provider){}
  public record Publish(@NotBlank @Size(max=120) String label,@NotNull Long expectedProfileRevision,@NotBlank String expectedIdentityFingerprint,boolean acknowledgePublicClaims){}
  public record Enable(@NotNull Long revision,boolean enabled){}
  private final SigningOptionRepository options;private final SigningChoices choices;private final com.fasterxml.jackson.databind.ObjectMapper mapper;private final AuditService audit;private final WorkspaceRepository workspaces;
  public SigningOptionsController(SigningOptionRepository options,SigningChoices choices,com.fasterxml.jackson.databind.ObjectMapper mapper,AuditService audit,WorkspaceRepository workspaces){this.options=options;this.choices=choices;this.mapper=mapper;this.audit=audit;this.workspaces=workspaces;}
- private View view(SigningOption o)throws Exception{boolean ready;try{choices.material(o);ready=true;}catch(Exception e){ready=false;}return new View(o.id,o.revision,o.label,mapper.readValue(o.settings,ConfigurationController.Settings.class),o.profileRevision,o.fingerprint,o.development,o.enabled,ready,o.createdAt);}
+ private View view(SigningOption o)throws Exception{boolean ready;try{choices.material(o);ready=true;}catch(Exception e){ready=false;}return new View(o.id,o.revision,o.label,mapper.readValue(o.settings,ConfigurationController.Settings.class),o.profileRevision,o.fingerprint,o.development,o.enabled,ready,o.createdAt,o.keyPath.startsWith("pkcs11:")?"PKCS11":o.development?"DEVELOPMENT":"LOCAL_PKCS12");}
  private List<View> list(boolean admin,int page)throws Exception{if(page<0 || page>10000)throw new ResponseStatusException(HttpStatus.BAD_REQUEST);var paging=org.springframework.data.domain.PageRequest.of(page,50);List<View> result=new ArrayList<>();for(var o:admin?options.findByWorkspaceIdOrderByCreatedAtDesc(WorkspaceContext.id(),paging):options.findByWorkspaceIdAndEnabledTrueOrderByCreatedAtDesc(WorkspaceContext.id(),paging))result.add(view(o));return result;}
  @GetMapping("/api/v1/portal/signing-options") public List<View> publicList(@RequestParam(defaultValue="0") int page)throws Exception{return list(false,page);}
  @GetMapping("/api/v1/admin/signing-options") public List<View> adminList(@RequestParam(defaultValue="0") int page)throws Exception{return list(true,page);}

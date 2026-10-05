@@ -19,6 +19,8 @@ import time
 import urllib.error
 import urllib.request
 import zlib
+import select
+import shlex
 
 ROOT = Path(__file__).resolve().parent.parent
 ACCESS, SECRET = secrets.token_hex(16), secrets.token_hex(32)
@@ -96,10 +98,29 @@ class S3(http.server.BaseHTTPRequestHandler):
 
     do_PUT = do_GET = do_DELETE = handle_object
 
+def initialize_token(command, environment, so_pin, user_pin):
+    # The utility requires a controlling terminal. Feed each prompt without exposing PINs in argv.
+    process = subprocess.Popen(['script', '-q', '-e', '-c', shlex.join(command), '/dev/null'],
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               env=environment)
+    pending = b''; answers = iter([so_pin, so_pin, user_pin, user_pin]); deadline = time.monotonic() + 15
+    try:
+        while process.poll() is None and time.monotonic() < deadline:
+            if not select.select([process.stdout], [], [], .2)[0]: continue
+            output = os.read(process.stdout.fileno(), 4096)
+            if not output: break
+            pending += output
+            if b'PIN: ' in pending:
+                process.stdin.write((next(answers) + '\n').encode()); process.stdin.flush(); pending = b''
+        assert process.wait(timeout=2) == 0, 'Disposable token initialization failed; output omitted'
+    finally:
+        if process.poll() is None: process.kill(); process.wait()
+        process.stdin.close(); process.stdout.close()
+
 def chunk(kind, data):
     return struct.pack('!I', len(data)) + kind + data + struct.pack('!I', zlib.crc32(kind + data))
 
-def run(postgres_bin=None):
+def run(postgres_bin=None, softhsm_dir=None):
     assert (ROOT / 'backend/target/portal-api-0.1.0.jar').is_file(), 'Build the Java API first'
     assert (ROOT / 'c2pa-worker/target/debug/c2pa-worker').is_file(), 'Build the Rust worker first'
     with tempfile.TemporaryDirectory(prefix='c2pa-private-storage-') as temporary:
@@ -115,6 +136,13 @@ def run(postgres_bin=None):
         token = ''
         postgres = None
         application_environment = os.environ.copy()
+        if softhsm_dir:
+            softhsm = Path(softhsm_dir)
+            token_directory = sandbox / 'tokens'; token_directory.mkdir(mode=0o700)
+            token_config = sandbox / 'softhsm.conf'
+            token_config.write_text(f'directories.tokendir = {token_directory}\nobjectstore.backend = file\nlog.level = ERROR\nslots.removable = false\n')
+            application_environment['SOFTHSM2_CONF'] = str(token_config)
+
         if postgres_bin:
             binaries = Path(postgres_bin)
             assert (binaries / 'initdb').is_file() and (binaries / 'postgres').is_file(), 'Provide PostgreSQL server binaries'
@@ -219,6 +247,43 @@ def run(postgres_bin=None):
             assert 'keyPath' not in choice and 'certificatePath' not in choice
             assert call('/portal/signing-options', workspace=workspace) == []
             denied(lambda: call('/admin/signing-options/' + choice['id'], {'revision': choice['revision'], 'enabled': False}, method='PUT', workspace=workspace), 404)
+            if softhsm_dir:
+                # Import only a disposable fixture key into a real, non-exportable software token.
+                # Production hardware keys are provisioned separately and never uploaded to the portal.
+                hsm_pin, so_pin = secrets.token_hex(8), secrets.token_hex(8)
+                fixture_environment = {**application_environment, 'C2PA_TEST_PIN': hsm_pin,
+                    'LD_LIBRARY_PATH': str(softhsm / 'usr/lib/x86_64-linux-gnu')}
+                def native(command, input=None, allowed=(0,)):
+                    result = subprocess.run(command, input=input, env=fixture_environment, capture_output=True, timeout=30)
+                    assert result.returncode in allowed, 'Disposable token setup failed; provider output omitted'
+                    return result
+                initialize_token([str(softhsm / 'usr/bin/softhsm2-util'), '--module', str(softhsm / 'usr/lib/x86_64-linux-gnu/softhsm/libsofthsm2.so'), '--init-token', '--free', '--label', 'portal-fixture'], fixture_environment, so_pin, hsm_pin)
+                module = str(softhsm / 'usr/lib/x86_64-linux-gnu/softhsm/libsofthsm2.so')
+                key_directory = backend / '.local/development-identities'
+                key_directory = key_directory / (key_directory / 'current').read_text().strip()
+                key_der, cert_der = sandbox / 'key.der', sandbox / 'leaf.der'
+                native(['openssl', 'pkcs8', '-topk8', '-nocrypt', '-in', str(key_directory / 'key.pem'), '-outform', 'DER', '-out', str(key_der)])
+                key_der.chmod(0o600)
+                native(['openssl', 'x509', '-in', str(key_directory / 'chain.pem'), '-outform', 'DER', '-out', str(cert_der)])
+                tool = [str(softhsm / 'usr/bin/pkcs11-tool'), '--module', module, '--token-label', 'portal-fixture', '--login', '--pin', 'env:C2PA_TEST_PIN']
+                native(tool + ['--write-object', str(key_der), '--type', 'privkey', '--id', '01', '--label', 'portal-hsm', '--usage-sign', '--sensitive', '--private'])
+                native(tool + ['--write-object', str(cert_der), '--type', 'cert', '--id', '01', '--label', 'portal-hsm'])
+                extraction = native(tool + ['--read-object', '--type', 'privkey', '--id', '01'], allowed=(0,1))
+                assert not extraction.stdout, 'Software token returned private key material'
+                key_der.unlink()
+                (key_directory / 'key.pem').unlink()  # The hardware flow must work without the fixture PEM key.
+                pin_credential = call('/admin/credentials', {'label': 'Disposable HSM PIN', 'value': hsm_pin})['id']
+                hardware = call('/admin/hardware-identities', {'configuration': {'module': module, 'slotListIndex': 0,
+                    'keyAlias': 'portal-hsm', 'pinCredential': pin_credential}, 'certificateChainPem': (key_directory / 'chain.pem').read_text()})
+                approval = {'label': 'Hardware editorial choice', 'expectedProfileRevision': configuration['activeRevision'],
+                    'expectedIdentityFingerprint': hardware['fingerprint'], 'acknowledgePrivateTrust': True}
+                denied(lambda: call('/admin/hardware-identities/' + hardware['id'] + '/approve', approval), 409)
+                denied(lambda: call('/admin/hardware-identities/' + hardware['id'] + '/test', {}, workspace=workspace), 404)
+                hardware = call('/admin/hardware-identities/' + hardware['id'] + '/test', {})
+                assert hardware['testedAt'] and 'pin' not in hardware['configuration']
+                call('/admin/signing-options/' + choice['id'], {'revision': choice['revision'], 'enabled': False}, method='PUT')
+                choice = call('/admin/hardware-identities/' + hardware['id'] + '/approve', approval)
+                assert choice['fingerprint'] == configuration['signingFingerprint'] and not choice['development']
             # Default changes must not change an already approved choice.
             revised = call('/admin/configuration')
             revised_settings = {**revised['draft'], 'organizationName': 'New default organization', 'profileName': 'New default profile'}
@@ -333,7 +398,7 @@ def run(postgres_bin=None):
             data, headers = multipart({'password': backup_password, 'acknowledgeRestore': 'true'}, 'key.backup', backup)
             assert call('/admin/security/restore', data=data, extra=headers)['available']
             assert call(f'/jobs/{job["id"]}/download', raw=True) == signed
-            print(('PostgreSQL' if postgres_bin else 'H2') + ': approved signing choices/rotation/withdrawal, MFA, one-time account recovery, migrations, leased native C2PA job, private storage, SigV4, scoped API-key signing/revocation, provider snapshots, notifications, HMAC webhooks, audit checkpoint, workspace isolation, restart persistence and encryption-key recovery passed.')
+            print(('PostgreSQL' if postgres_bin else 'H2') + (': PKCS#11/non-exportable SoftHSM signing, ' if softhsm_dir else ': ') + 'approved signing choices/rotation/withdrawal, MFA, one-time account recovery, migrations, leased native C2PA job, private storage, SigV4, scoped API-key signing/revocation, provider snapshots, notifications, HMAC webhooks, audit checkpoint, workspace isolation, restart persistence and encryption-key recovery passed.')
         finally:
             stop(); fixture.shutdown(); fixture.server_close()
             if postgres is not None:
@@ -344,4 +409,6 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--postgres-bin', help='Directory containing initdb and postgres; creates a private temporary cluster')
-    run(parser.parse_args().postgres_bin)
+    parser.add_argument('--softhsm-dir', help='Extracted SoftHSM/OpenSC prefix; uses only a disposable private test token')
+    args = parser.parse_args()
+    run(args.postgres_bin, args.softhsm_dir)

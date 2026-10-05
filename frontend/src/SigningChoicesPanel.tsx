@@ -13,6 +13,7 @@ export type SigningChoice = {
     maxUploadMb: number;
     requireAiDisclosure: boolean;
   };
+  provider: string;
   development: boolean;
   enabled: boolean;
   available: boolean;
@@ -98,7 +99,9 @@ export function SigningChoiceSelector({
           Certificate SHA-256: <code>{value.fingerprint}</code>.{" "}
           {value.development
             ? "Development certificate; untrusted."
-            : "Private certificate; public trust unverified."}{" "}
+            : value.provider === "PKCS11"
+              ? "PKCS#11 token; public trust unverified."
+              : "Private certificate; public trust unverified."}{" "}
           No trusted timestamp.
         </p>
       )}
@@ -247,7 +250,11 @@ export default function SigningChoicesPanel({
                 <td>
                   <code>{c.fingerprint}</code>
                   <br />
-                  {c.development ? "Development" : "Private certificate"}
+                  {c.provider === "PKCS11"
+                    ? "PKCS#11 token"
+                    : c.development
+                      ? "Development"
+                      : "Private certificate"}
                 </td>
                 <td>
                   {c.enabled ? "Enabled" : "Withdrawn"} ·{" "}
