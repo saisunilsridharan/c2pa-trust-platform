@@ -20,7 +20,7 @@ React + TypeScript portal, Java 21 Spring Boot API with Swagger UI, and a Rust w
 - UI import of password-protected PKCS#12 private CA identities, validated with the actual Rust signing worker.
 - Swagger UI documents the APIs and supports the administrator token through its Authorize button.
 
-KMS/HSM, external storage providers, OIDC/SSO, workspace isolation, secret encryption, trusted timestamps, public trust-list validation, and tamper-evident audit storage remain pending. Local private-CA import is supported, but does not establish public trust or provide hardware key protection. Keys cannot be exported through the API. See [the implementation roadmap](docs/implementation-plan.md).
+KMS/HSM, external storage providers, OIDC/SSO, secret encryption, trusted timestamps, public trust-list validation, and tamper-evident audit storage remain pending. Local private-CA import is supported, but does not establish public trust or provide hardware key protection. Keys cannot be exported through the API. See [the implementation roadmap](docs/implementation-plan.md).
 
 ## Development
 
@@ -66,7 +66,7 @@ Database connection configuration is the only application setting supplied outsi
 
 Development defaults to a persistent H2 database in `backend/.local/`. PostgreSQL JDBC support is included but production migrations and PostgreSQL validation are still pending. Automatic schema updates are for development only.
 
-Application settings are stored in the database and survive backend restarts. Bootstrap authentication survives through its protected local token file. No storage credentials are stored yet. The development signing key stays in owner-only `backend/.local/development-identity/`; this file-based development provider is not suitable for production.
+Application settings are stored in the database and survive backend restarts. Bootstrap authentication survives through its protected local token file. No external storage credentials are stored yet. The development signing key stays in owner-only `backend/.local/development-identity/`; this file-based development provider is not suitable for production.
 
 ## Administration and recovery
 
@@ -91,7 +91,7 @@ Java tests cover access control, revisions, history, rollback, audits, real cert
 
 Before any users exist, connect using the local bootstrap token under Initial setup and enroll the first administrator in Users and permissions. Enrollment permanently disables the bootstrap token. Sign in with the new username and password thereafter. Administrators can create, disable, and assign ADMIN/SIGNER/VIEWER roles through the UI; the last enabled administrator cannot be disabled or demoted.
 
-ADMIN manages settings, users, identity rotation, history, and audits and may sign/verify. SIGNER signs and verifies using active settings. VIEWER reads active settings, verifies, and reads its own saved assets. All users currently share one organization; multi-workspace isolation is pending. Roles and account status are checked on every API request.
+Platform ADMIN manages accounts and workspaces. Workspace ADMIN manages its settings, identity, membership, history, and audits and may sign/verify. SIGNER signs and verifies using active settings. VIEWER reads active settings, verifies, and reads its own saved assets. Existing users and data are assigned to the default workspace once. Profiles, identities, jobs, retention and audit history are isolated by workspace. Global ADMIN accounts are platform administrators and can access every workspace; other accounts use their workspace membership roles. Roles and account status are checked on every API request.
 
 Passwords use BCrypt cost 12, require at least 12 characters, and accept at most 72 UTF-8 bytes. Five failed attempts lock a known account for 15 minutes. Session tokens expire after eight hours; only SHA-256 hashes are stored server-side. Tokens remain only in browser memory. Sign out revokes the current token; disabling users blocks their sessions immediately. UI password changes revoke all the account's sessions. Administrator-assisted recovery and active-session counts/revocation are implemented. OIDC/SSO, MFA, self-service forgotten-password recovery, and broader rate limiting remain pending.
 
@@ -116,3 +116,13 @@ The portal supports signing and inspection of JPEG, PNG, WebP, TIFF, WAV, MP3, F
 The Rust worker includes the SDK's PDF feature. Basic generated PDF signing, inspection, re-signing and tamper checks pass; encrypted PDFs and existing digital signatures need separate compatibility evaluation. Arbitrary files do not automatically support embedded C2PA credentials. Format parsers still reject malformed or unsupported variants.
 
 For a repeatable multi-format check, enable the nine formats through the UI and run `python scripts/smoke-formats.py`. It generates small fixtures using FFmpeg (a test-only dependency), checks signing, inspection, retained provenance and altered-content detection, and deletes temporary fixtures. A dedicated in-memory database was used for implementation checks so the real active profile was preserved.
+
+## Workspace controls
+
+Use Workspaces to create or rename a workspace, select it, and assign existing accounts ADMIN/SIGNER/VIEWER membership roles. Platform administrators create accounts; workspace administrators cannot manage platform accounts, reset other users' passwords, or view their sessions. An account created while a workspace is selected gets membership in that workspace. Workspace names and the public organization/profile claims are separate settings.
+
+API requests select a workspace with `X-Workspace-Id`. Omission uses the first accessible workspace (the default workspace for platform administrators). Swagger documents this optional header. Membership changes are checked on every request, and removal blocks access without revoking sessions for other workspaces. Workspace administrators must retain an enabled administrator; platform administrators can recover memberships. Platform administrators retain all-workspace access even if their explicit membership is removed. Accounts without any memberships may change their password or sign out, but cannot access content.
+
+Legacy configuration, jobs and audits retain workspace 1. Existing users receive default memberships only during the initial migration; startup never restores removed access. New identities are in protected `backend/.local/workspaces/<id>/development-identities/` directories. The default identity keeps its legacy paths. Job IDs are still UUIDs and assets stay under the protected shared assets directory, with API access checked against workspace and owner. Idempotency keys are scoped to workspace and owner; default-workspace legacy keys remain supported.
+
+The browser holds workspace selection in memory. Pending requests capture their original workspace, preventing a batch or configuration save from moving into a newly selected workspace. Run `cd frontend && npm test` for these client checks. Backend tests and isolated HTTP checks cover membership/role boundaries, configuration/history/rollback isolation, independent identity keys, asset access, audits, operations, and restart persistence.

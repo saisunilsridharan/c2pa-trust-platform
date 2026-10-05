@@ -1,3 +1,4 @@
+import { portalFetch as connectionFetch, workspaceFetch } from "./portalFetch";
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
@@ -6,6 +7,8 @@ import AdministrationPanel from "./AdministrationPanel";
 import UsersPanel from "./UsersPanel";
 import PasswordPanel from "./PasswordPanel";
 import JobsPanel from "./JobsPanel";
+import WorkspacesPanel from "./WorkspacesPanel";
+import { setActiveWorkspace } from "./portalFetch";
 type Capability = {
   mime: string;
   label: string;
@@ -35,6 +38,8 @@ function App() {
     username: string;
     role: string;
     passwordChangeRequired: boolean;
+    workspaceId: number;
+    platformAdministrator: boolean;
   } | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -45,15 +50,19 @@ function App() {
   const [report, setReport] = useState<unknown>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [switching, setSwitching] = useState(false);
   const [tested, setTested] = useState(false);
   const [saved, setSaved] = useState(true);
-  async function connect(sessionToken: string) {
-    const response = await fetch("/api/v1/auth/me", {
+  const fetch = workspaceFetch(user?.workspaceId ?? null);
+  async function connect(sessionToken: string, workspace?: number) {
+    setActiveWorkspace(workspace ?? null);
+    const response = await connectionFetch("/api/v1/auth/me", {
       headers: { "X-Admin-Token": sessionToken },
     });
     if (!response.ok) throw new Error("Authentication failed.");
     const account = await response.json();
-    if (account.passwordChangeRequired) {
+    setActiveWorkspace(account.workspaceId > 0 ? account.workspaceId : null);
+    if (account.passwordChangeRequired || account.workspaceId === 0) {
       setToken(sessionToken);
       setUser(account);
       setState(null);
@@ -61,7 +70,7 @@ function App() {
       setPassword("");
       return;
     }
-    const config = await fetch(
+    const config = await connectionFetch(
       account.role === "ADMIN"
         ? "/api/v1/admin/configuration"
         : "/api/v1/portal/configuration",
@@ -69,7 +78,7 @@ function App() {
     );
     if (!config.ok) throw new Error("Could not load portal settings.");
     const next = await config.json();
-    const caps = await fetch("/api/v1/portal/capabilities", {
+    const caps = await connectionFetch("/api/v1/portal/capabilities", {
       headers: { "X-Admin-Token": sessionToken },
     });
     if (!caps.ok) throw new Error("Could not load supported formats.");
@@ -89,7 +98,20 @@ function App() {
     );
     setPassword("");
   }
+  async function switchWorkspace(id: number) {
+    const previous = user?.workspaceId ?? null;
+    setSwitching(true);
+    try {
+      await connect(token, id);
+    } catch (e) {
+      setActiveWorkspace(previous);
+      throw e;
+    } finally {
+      setSwitching(false);
+    }
+  }
   function disconnect() {
+    setActiveWorkspace(null);
     setState(null);
     setUser(null);
     setSettings(null);
@@ -160,11 +182,14 @@ function App() {
           private CA certificate through the UI. Public trust and hardware key
           providers are not connected.
         </div>
-        {user?.passwordChangeRequired ? (
+        {switching ? (
+          <p role="status">Loading workspace…</p>
+        ) : user && (user.passwordChangeRequired || user.workspaceId === 0) ? (
           <>
             <div className="notice">
-              Your administrator reset your password. Choose a new password
-              before using the portal.
+              {user.passwordChangeRequired
+                ? "Your administrator reset your password. Choose a new password before using the portal."
+                : "No workspace access is assigned. A workspace administrator must add your account."}
             </div>
             <PasswordPanel token={token} onChanged={disconnect} />
             <button
@@ -249,21 +274,32 @@ function App() {
         ) : (
           settings && (
             <>
+              {user && user.id !== null && (
+                <WorkspacesPanel
+                  token={token}
+                  current={user?.workspaceId ?? 1}
+                  platformAdmin={user?.platformAdministrator ?? false}
+                  onSelect={switchWorkspace}
+                  onAccessChanged={() => connect(token, user?.workspaceId)}
+                />
+              )}
               <p>
                 Signed in as {user?.username} · {user?.role}
               </p>
               {user?.role === "ADMIN" && (
                 <>
-                  <UsersPanel
-                    token={token}
-                    bootstrap={user.id === null}
-                    onEnrolled={() => {
-                      disconnect();
-                      setMessage(
-                        "Administrator enrolled. Sign in with your new credentials.",
-                      );
-                    }}
-                  />
+                  {user?.platformAdministrator && (
+                    <UsersPanel
+                      token={token}
+                      bootstrap={user.id === null}
+                      onEnrolled={() => {
+                        disconnect();
+                        setMessage(
+                          "Administrator enrolled. Sign in with your new credentials.",
+                        );
+                      }}
+                    />
+                  )}
                   <section>
                     <div className="section-title">
                       <h2>Organization & signing profile</h2>

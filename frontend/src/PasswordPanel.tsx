@@ -1,3 +1,4 @@
+import { workspaceFetch } from "./portalFetch";
 import { useState } from "react";
 export default function PasswordPanel({
   token,
@@ -6,6 +7,7 @@ export default function PasswordPanel({
   token: string;
   onChanged: () => void;
 }) {
+  const fetch = workspaceFetch();
   const [current, setCurrent] = useState(""),
     [password, setPassword] = useState(""),
     [confirmation, setConfirmation] = useState(""),

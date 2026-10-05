@@ -1,3 +1,4 @@
+import { workspaceFetch } from "./portalFetch";
 import { useEffect, useState } from "react";
 type Props = {
   token: string;
@@ -20,6 +21,7 @@ export default function SigningPanel({
   active,
   available: initialAvailable,
 }: Props) {
+  const fetch = workspaceFetch();
   const [available, setAvailable] = useState(initialAvailable),
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");

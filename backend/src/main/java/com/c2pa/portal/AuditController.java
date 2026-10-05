@@ -11,6 +11,6 @@ public class AuditController {
     @GetMapping("/api/v1/admin/audit-events")
     public List<AuditEvent> list(@RequestParam(defaultValue="0") int page){
         if(page<0 || page>10000)throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,"Invalid page");
-        return repository.findAllByOrderByIdDesc(PageRequest.of(page,50));
+        return repository.findByWorkspaceIdOrderByIdDesc(WorkspaceContext.id(),PageRequest.of(page,50));
     }
 }

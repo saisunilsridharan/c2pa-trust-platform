@@ -41,7 +41,7 @@ public class SigningController {
   if(creator.isBlank() || creator.length()>120 || title.isBlank() || title.length()>200)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Creator and title are required and must fit field limits");
   if(!Set.of("none","generated","edited","unspecified").contains(aiDisclosure))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid AI disclosure");
   if(!identity.available())throw new ResponseStatusException(HttpStatus.CONFLICT,"Configure a signing identity first");
-  var record=repository.findById(1L).filter(r->r.active!=null).orElseThrow(()->new ResponseStatusException(HttpStatus.CONFLICT,"Activate a profile first"));
+  var record=repository.findById(WorkspaceContext.id()).filter(r->r.active!=null).orElseThrow(()->new ResponseStatusException(HttpStatus.CONFLICT,"Activate a profile first"));
   var settings=mapper.readValue(record.active,ConfigurationController.Settings.class);
   if(settings.requireAiDisclosure() && aiDisclosure.equals("unspecified"))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"AI disclosure is required by the active profile");
   if(file.isEmpty() || file.getSize()>settings.maxUploadMb()*1024L*1024)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"File is empty or exceeds profile limits");

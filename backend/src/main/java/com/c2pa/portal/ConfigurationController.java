@@ -20,13 +20,13 @@ public class ConfigurationController {
  private final ConfigurationRepository repository; private final ObjectMapper mapper; private final DevelopmentIdentity identity; private final ConfigurationVersionRepository versions; private final AuditService audit;
  public ConfigurationController(ConfigurationRepository repository,ObjectMapper mapper,DevelopmentIdentity identity,ConfigurationVersionRepository versions,AuditService audit) {this.repository=repository;this.mapper=mapper;this.identity=identity;this.versions=versions;this.audit=audit;}
  private ConfigurationRecord record() {
-  ConfigurationRecord record=repository.findById(1L).orElseGet(()->{
-   ConfigurationRecord r=new ConfigurationRecord();r.id=1L;
+  ConfigurationRecord record=repository.findById(WorkspaceContext.id()).orElseGet(()->{
+   ConfigurationRecord r=new ConfigurationRecord();r.id=WorkspaceContext.id();
    r.draft=encode(new Settings("My organization","Creator attribution",Set.of("image/jpeg","image/png"),25,true));
    return repository.saveAndFlush(r);
   });
   if(record.active!=null && record.activeRevision==null){record.activeRevision=record.revision;repository.saveAndFlush(record);}
-  if(record.active!=null && !versions.existsByConfigurationRevision(record.activeRevision))snapshot(record,"RECOVERED");
+  if(record.active!=null && !versions.existsByWorkspaceIdAndConfigurationRevision(WorkspaceContext.id(),record.activeRevision))snapshot(record,"RECOVERED");
   return record;
  }
  private String encode(Settings s) {try{return mapper.writeValueAsString(s);}catch(Exception e){throw new IllegalStateException(e);}}
@@ -52,19 +52,20 @@ public class ConfigurationController {
  public record Rollback(@NotNull Long versionId,@NotNull Long revision) {}
  public record History(Long id,Long revision,java.time.Instant createdAt,String action,Settings settings) {}
  private void snapshot(ConfigurationRecord record,String action){
-  ConfigurationVersion version=new ConfigurationVersion();version.configurationRevision=record.activeRevision;
+  ConfigurationVersion version=new ConfigurationVersion();version.configurationRevision=record.activeRevision;version.workspaceId=WorkspaceContext.id();
   version.createdAt=java.time.Instant.now();version.action=action;version.settings=record.active;
   versions.save(version);audit.record("CONFIGURATION_"+action,String.valueOf(record.activeRevision));
  }
  @GetMapping("/admin/configuration/history") @SecurityRequirement(name="adminToken")
  public List<History> history(@RequestParam(defaultValue="0") int page){
   if(page<0 || page>10000)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid page");
-  return versions.findAllByOrderByIdDesc(org.springframework.data.domain.PageRequest.of(page,50)).stream().map(v->new History(v.id,v.configurationRevision,v.createdAt,v.action,decode(v.settings))).toList();
+  return versions.findByWorkspaceIdOrderByIdDesc(WorkspaceContext.id(),org.springframework.data.domain.PageRequest.of(page,50)).stream().map(v->new History(v.id,v.configurationRevision,v.createdAt,v.action,decode(v.settings))).toList();
  }
  @PostMapping("/admin/configuration/rollback") @SecurityRequirement(name="adminToken") @Transactional
  public State rollback(@Valid @RequestBody Rollback request){
   ConfigurationRecord record=current(request.revision());
   ConfigurationVersion version=versions.findById(request.versionId()).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Configuration version not found"));
+  if(!version.workspaceId.equals(WorkspaceContext.id()))throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Configuration version not found");
   record.draft=version.settings;record.active=version.settings;record.activeRevision=record.revision+1;
   repository.saveAndFlush(record);snapshot(record,"ROLLED_BACK");return state(record);
  }

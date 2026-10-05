@@ -16,9 +16,12 @@ public class DevelopmentIdentity {
  private final Path storage;
  private final Path legacy;
  private final java.time.Clock clock;
- public DevelopmentIdentity(){this(Path.of(".local"));}
+ private boolean scopedRoot=false;private final Map<Long,DevelopmentIdentity> scopes=new HashMap<>();
+ public DevelopmentIdentity(){this(Path.of(".local"));scopedRoot=true;}
  DevelopmentIdentity(Path base){this(base,java.time.Clock.systemUTC());}
+ DevelopmentIdentity(Path base,java.time.Clock clock,boolean scopedRoot){this(base,clock);this.scopedRoot=scopedRoot;}
  DevelopmentIdentity(Path base,java.time.Clock clock){this.clock=clock;storage=base.resolve("development-identities").toAbsolutePath();legacy=base.resolve("development-identity").toAbsolutePath();}
+ private synchronized DevelopmentIdentity scoped(){Long id=WorkspaceContext.id();if(!scopedRoot || id.equals(1L))return this;return scopes.computeIfAbsent(id,i->new DevelopmentIdentity(storage.getParent().resolve("workspaces").resolve(i.toString()),clock));}
  public record Status(boolean configured,boolean available,String state,String provider,boolean productionTrusted,String fingerprint,Instant expiresAt) {}
  public record Material(Path certificate,Path key,String fingerprint,boolean development) { public Material(Path certificate,Path key,String fingerprint){this(certificate,key,fingerprint,true);} }
  private Path directory() throws Exception {
@@ -29,6 +32,7 @@ public class DevelopmentIdentity {
   return storage.resolve(id);
  }
  public synchronized Status status(){
+  var scope=scoped();if(scope!=this)return scope.status();
   try {
    Path directory=directory();
    if(!Files.exists(directory))return new Status(false,false,"NOT_CONFIGURED","development",false,null,null);
@@ -43,16 +47,19 @@ public class DevelopmentIdentity {
  }
  public boolean available(){return status().available();}
  public synchronized Material material() throws Exception {
+  var scope=scoped();if(scope!=this)return scope.material();
   Status status=status();
   if(!status.available())throw new ResponseStatusException(HttpStatus.CONFLICT,"Signing identity is unavailable or expired; replace it in the UI");
   Path directory=directory();return new Material(directory.resolve("chain.pem"),directory.resolve("key.pem"),status.fingerprint(),status.provider().equals("development"));
  }
  public record Creation(Status status,boolean created) {}
  public synchronized Creation create() throws Exception {
+  var scope=scoped();if(scope!=this)return scope.create();
   if(status().configured())return new Creation(status(),false);
   publish(generate());return new Creation(status(),true);
  }
  public synchronized Status rotate(String expectedFingerprint) throws Exception {
+  var scope=scoped();if(scope!=this)return scope.rotate(expectedFingerprint);
   Status current=status();
   if(!current.configured())throw new ResponseStatusException(HttpStatus.CONFLICT,"Create an identity first");
   if(!Objects.equals(expectedFingerprint,current.fingerprint()))throw new ResponseStatusException(HttpStatus.CONFLICT,"Identity changed; reload before rotation");
@@ -60,6 +67,7 @@ public class DevelopmentIdentity {
  }
 
  public synchronized Status importPrivate(byte[] bundle,char[] password,String expectedFingerprint) throws Exception {
+  var scope=scoped();if(scope!=this)return scope.importPrivate(bundle,password,expectedFingerprint);
   Path temporary=null;
   try {
    if(bundle.length==0 || bundle.length>1024*1024)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"PKCS#12 bundle must be under 1 MiB");

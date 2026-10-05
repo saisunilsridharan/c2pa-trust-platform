@@ -1,3 +1,4 @@
+import { workspaceFetch } from "./portalFetch";
 import { useEffect, useState } from "react";
 type Identity = {
   configured: boolean;
@@ -27,6 +28,7 @@ export default function AdministrationPanel({
   revision,
   onChange,
 }: Props) {
+  const fetch = workspaceFetch();
   const [identity, setIdentity] = useState<Identity | null>(null),
     [history, setHistory] = useState<Version[]>([]),
     [events, setEvents] = useState<Event[]>([]);

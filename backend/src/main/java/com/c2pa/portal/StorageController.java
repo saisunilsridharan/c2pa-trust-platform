@@ -13,7 +13,7 @@ public class StorageController {
  public StorageController(StorageRepository storage,AuditService audit){this.storage=storage;this.audit=audit;}
  public record Settings(Long revision,String provider,int retentionDays){}
  public record Update(@NotNull Long revision,@Min(1) @Max(3650) int retentionDays,boolean acknowledgeDeletion){}
- private AssetStorage settings(){return storage.findById(1L).orElseGet(()->storage.saveAndFlush(new AssetStorage()));}
+ private AssetStorage settings(){return storage.findById(WorkspaceContext.id()).orElseGet(()->{var settings=new AssetStorage();settings.id=WorkspaceContext.id();return storage.saveAndFlush(settings);});}
  @GetMapping @Transactional public Settings get(){var s=settings();return new Settings(s.revision,"Managed local storage",s.retentionDays);}
  @PutMapping @Transactional public Settings update(@Valid @RequestBody Update request){
   if(!request.acknowledgeDeletion())throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Acknowledge automatic deletion after retention");

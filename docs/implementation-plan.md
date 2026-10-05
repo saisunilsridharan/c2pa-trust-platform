@@ -18,7 +18,7 @@ UI-created development identities, reviewed user declarations, image/audio/video
 
 ## Next: production signing vertical slice
 
-1. Named-user enrollment/login, organization roles, account disabling, password changes, and user-attributed audits are implemented. Administrator-assisted recovery with forced password change and session revocation/counts are implemented. Next add workspaces, OIDC/SSO, MFA, self-service recovery, and stronger production login controls.
+1. Named-user enrollment/login, organization roles, account disabling, password changes, and user-attributed audits are implemented. Administrator-assisted recovery with forced password change and session revocation/counts are implemented. Workspace-scoped profiles, identities, memberships, jobs, retention, audits and operations are implemented, with platform administrator recovery. Next add OIDC/SSO, MFA, self-service recovery, and stronger production login controls.
 2. Add Flyway migrations and PostgreSQL integration tests.
 3. Implement UI storage setup with test-before-activation and encrypted write-only credentials.
 4. Add KMS/HSM providers and production certificate lifecycle. Development expiry status and UI rotation are implemented.

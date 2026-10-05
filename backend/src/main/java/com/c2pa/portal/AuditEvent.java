@@ -8,5 +8,6 @@ public class AuditEvent {
     public String actor;
     public String action;
     public String reference;
-    public AuditEvent() {}
+    @Column(nullable=false,columnDefinition="bigint default 1") public Long workspaceId=1L;
+ public AuditEvent() {}
 }

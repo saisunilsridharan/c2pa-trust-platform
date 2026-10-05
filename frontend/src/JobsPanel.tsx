@@ -1,3 +1,4 @@
+import { workspaceFetch } from "./portalFetch";
 import { useEffect, useState } from "react";
 type Job = {
   id: string;
@@ -30,6 +31,7 @@ export default function JobsPanel({
   profileRevision: number | null;
   signingFingerprint: string | null;
 }) {
+  const fetch = workspaceFetch();
   const [operations, setOperations] = useState<Record<string, unknown> | null>(
     null,
   );

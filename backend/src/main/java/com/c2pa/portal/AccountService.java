@@ -10,10 +10,10 @@ import java.time.*;
 import java.util.*;
 @Service
 public class AccountService {
- private final UserRepository users; private final SessionRepository sessions;
+ private final UserRepository users; private final SessionRepository sessions;private final MembershipRepository memberships;
  private final BCryptPasswordEncoder encoder=new BCryptPasswordEncoder(12);
  private final String dummy=encoder.encode("unused-account-password");
- public AccountService(UserRepository users,SessionRepository sessions){this.users=users;this.sessions=sessions;}
+ public AccountService(UserRepository users,SessionRepository sessions,MembershipRepository memberships){this.users=users;this.sessions=sessions;this.memberships=memberships;}
  public record Profile(Long id,String username,String role,boolean enabled,boolean passwordChangeRequired){}
  public record Login(String token,Instant expiresAt,Profile user){}
  public static String hash(String token){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8)));}catch(Exception e){throw new IllegalStateException(e);}}
@@ -39,11 +39,11 @@ public class AccountService {
   return new Login(token,session.expiresAt,profile(user));
  }
  public void logout(String token){if(token!=null)sessions.deleteById(hash(token));}
- public PortalUser create(String username,String password,String role){
+ @Transactional public PortalUser create(String username,String password,String role){
   validatePassword(password);
   if(!username.matches("[a-z][a-z0-9_.-]{2,39}") || !Set.of("ADMIN","SIGNER","VIEWER").contains(role))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid username or role");
   if(users.findByUsername(username).isPresent())throw new ResponseStatusException(HttpStatus.CONFLICT,"Username already exists");
-  PortalUser user=new PortalUser();user.username=username;user.passwordHash=encoder.encode(password);user.role=role;return users.saveAndFlush(user);
+  PortalUser user=new PortalUser();user.username=username;user.passwordHash=encoder.encode(password);user.role=role;user=users.saveAndFlush(user);WorkspaceMembership m=new WorkspaceMembership();m.userId=user.id;m.workspaceId=WorkspaceContext.id();m.role=role;memberships.save(m);return user;
  }
  @Transactional
  public boolean changePassword(Long userId,String currentPassword,String newPassword){

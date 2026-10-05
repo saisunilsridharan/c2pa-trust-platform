@@ -1,3 +1,4 @@
+import { workspaceFetch } from "./portalFetch";
 import { useEffect, useState } from "react";
 type User = {
   id: number | null;
@@ -15,6 +16,7 @@ export default function UsersPanel({
   bootstrap: boolean;
   onEnrolled: () => void;
 }) {
+  const fetch = workspaceFetch();
   const [counts, setCounts] = useState<Record<number, number>>({}),
     [resetUser, setResetUser] = useState(""),
     [temporary, setTemporary] = useState(""),

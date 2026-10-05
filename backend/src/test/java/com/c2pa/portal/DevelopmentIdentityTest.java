@@ -6,6 +6,15 @@ import java.time.*;
 import static org.junit.jupiter.api.Assertions.*;
 class DevelopmentIdentityTest {
  @TempDir Path directory;
+ @Test void workspacesUseSeparateKeysAndLegacyDefaultMaterial()throws Exception {
+  DevelopmentIdentity identity=new DevelopmentIdentity(directory,Clock.systemUTC(),true);
+  var request=new org.springframework.mock.web.MockHttpServletRequest();org.springframework.web.context.request.RequestContextHolder.setRequestAttributes(new org.springframework.web.context.request.ServletRequestAttributes(request));
+  try{
+   request.setAttribute("portal.workspaceId",1L);identity.create();var first=identity.material();
+   request.setAttribute("portal.workspaceId",2L);assertFalse(identity.available());assertThrows(org.springframework.web.server.ResponseStatusException.class,identity::material);identity.create();var second=identity.material();assertNotEquals(first.key(),second.key());assertNotEquals(first.fingerprint(),second.fingerprint());
+   identity.rotate(second.fingerprint());request.setAttribute("portal.workspaceId",1L);assertEquals(first.fingerprint(),identity.status().fingerprint());assertEquals(first.key(),identity.material().key());
+  }finally{org.springframework.web.context.request.RequestContextHolder.resetRequestAttributes();}
+ }
  @Test void privateBundleRunsRealSigningProbeAndSurvivesRestart()throws Exception {
   org.junit.jupiter.api.Assumptions.assumeTrue(Files.isExecutable(Path.of("../c2pa-worker/target/debug/c2pa-worker")),"Build the Rust worker before this integration check");
   DevelopmentIdentity identity=new DevelopmentIdentity(directory);identity.create();var material=identity.material();

@@ -22,18 +22,18 @@ public class JobService {
  public synchronized SigningJob submit(MultipartFile file,String creator,String title,String ai,String owner,String requestId,Long expectedProfileRevision,String expectedIdentityFingerprint) throws Exception {
   if(creator.isBlank() || creator.length()>120 || title.isBlank() || title.length()>200 || !Set.of("none","generated","edited","unspecified").contains(ai))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid public claims");
   if(!requestId.matches("[a-zA-Z0-9-]{1,80}"))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid request identifier");
-  String requestKey=owner+":"+requestId;
+  String requestKey=WorkspaceContext.id()+":"+owner+":"+requestId;
   MessageDigest digest=MessageDigest.getInstance("SHA-256");try(var input=file.getInputStream()){byte[] buffer=new byte[8192];int n;while((n=input.read(buffer))!=-1)digest.update(buffer,0,n);}
   String contentHash=HexFormat.of().formatHex(digest.digest());
   digest.update((contentHash+mapper.writeValueAsString(List.of(creator,title,ai))).getBytes(java.nio.charset.StandardCharsets.UTF_8));String requestDigest=HexFormat.of().formatHex(digest.digest());
-  var existing=jobs.findByRequestKey(requestKey);if(existing.isPresent()){if(!Objects.equals(existing.get().requestDigest,requestDigest))throw new ResponseStatusException(HttpStatus.CONFLICT,"Request key already used for different content or claims");return existing.get();}
-  var record=configs.findById(1L).filter(c->c.active!=null).orElseThrow(()->new ResponseStatusException(HttpStatus.CONFLICT,"Activate a profile first"));
+  var existing=jobs.findByRequestKey(requestKey);if(existing.isEmpty() && WorkspaceContext.id().equals(1L))existing=jobs.findByRequestKey(owner+":"+requestId);if(existing.isPresent()){if(!Objects.equals(existing.get().requestDigest,requestDigest))throw new ResponseStatusException(HttpStatus.CONFLICT,"Request key already used for different content or claims");return existing.get();}
+  var record=configs.findById(WorkspaceContext.id()).filter(c->c.active!=null).orElseThrow(()->new ResponseStatusException(HttpStatus.CONFLICT,"Activate a profile first"));
   var settings=mapper.readValue(record.active,ConfigurationController.Settings.class);
   if(settings.requireAiDisclosure() && ai.equals("unspecified"))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"AI declaration required");
   if(file.isEmpty() || file.getSize()>settings.maxUploadMb()*1024L*1024)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"File exceeds profile limits");
   String format=ContentFormats.detect(file);
   if(format==null || !settings.formats().contains(format))throw new ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE,"Unsupported or disabled format");
-  var material=identity.material();if(!Objects.equals(expectedProfileRevision,record.activeRevision==null?record.revision:record.activeRevision) || !Objects.equals(expectedIdentityFingerprint,material.fingerprint()))throw new ResponseStatusException(HttpStatus.CONFLICT,"Profile or identity changed; reload and review public claims again");SigningJob job=new SigningJob();job.id=UUID.randomUUID().toString();job.owner=owner;job.requestKey=requestKey;job.requestDigest=requestDigest;job.state="QUEUED";job.format=format;job.title=title;job.fingerprint=material.fingerprint();job.certificatePath=material.certificate().toString();job.keyPath=material.key().toString();job.createdAt=Instant.now();
+  var material=identity.material();if(!Objects.equals(expectedProfileRevision,record.activeRevision==null?record.revision:record.activeRevision) || !Objects.equals(expectedIdentityFingerprint,material.fingerprint()))throw new ResponseStatusException(HttpStatus.CONFLICT,"Profile or identity changed; reload and review public claims again");SigningJob job=new SigningJob();job.id=UUID.randomUUID().toString();job.owner=owner;job.workspaceId=WorkspaceContext.id();job.requestKey=requestKey;job.requestDigest=requestDigest;job.state="QUEUED";job.format=format;job.title=title;job.fingerprint=material.fingerprint();job.certificatePath=material.certificate().toString();job.keyPath=material.key().toString();job.createdAt=Instant.now();
   Files.createDirectories(storage);Files.setPosixFilePermissions(storage,java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
   Path directory=directory(job.id);Files.createDirectory(directory,java.nio.file.attribute.PosixFilePermissions.asFileAttribute(java.nio.file.attribute.PosixFilePermissions.fromString("rwx------")));
   try {
@@ -59,17 +59,16 @@ public class JobService {
   finally {
    if(process!=null && process.isAlive()){process.destroyForcibly();try{process.waitFor(5,TimeUnit.SECONDS);}catch(InterruptedException e){Thread.currentThread().interrupt();}}
    job.completedAt=Instant.now();jobs.saveAndFlush(job);
-   AuditEvent event=new AuditEvent();event.createdAt=Instant.now();event.actor=job.owner;event.action="SIGNING_JOB_"+job.state;event.reference=job.id;audit.save(event);
+   AuditEvent event=new AuditEvent();event.createdAt=Instant.now();event.actor=job.owner;event.workspaceId=job.workspaceId;event.action="SIGNING_JOB_"+job.state;event.reference=job.id;audit.save(event);
   }
  }
  @Scheduled(cron="${portal.jobs.cleanup.schedule:0 0 * * * *}") public void cleanup() throws Exception {
-  int days=retention.findById(1L).map(s->s.retentionDays).orElse(30);
-  Instant cutoff=Instant.now().minusSeconds(days*86400L);
   for(String state:List.of("COMPLETED","FAILED","DELETING"))for(SigningJob job:jobs.findByStateOrderByCreatedAtAsc(state,PageRequest.of(0,1000))){
+   int days=retention.findById(job.workspaceId).map(s->s.retentionDays).orElse(30);Instant cutoff=Instant.now().minusSeconds(days*86400L);
    if(job.completedAt==null || !job.completedAt.isBefore(cutoff))continue;
    job.state="DELETING";job=jobs.saveAndFlush(job);
    Path folder=directory(job.id);if(Files.exists(folder)){try(var files=Files.list(folder)){for(Path file:files.toList())Files.deleteIfExists(file);}Files.delete(folder);}
-   jobs.deleteById(job.id);AuditEvent event=new AuditEvent();event.createdAt=Instant.now();event.actor="system";event.action="ASSET_RETENTION_DELETED";event.reference=job.id;audit.save(event);
+   jobs.deleteById(job.id);AuditEvent event=new AuditEvent();event.createdAt=Instant.now();event.actor="system";event.workspaceId=job.workspaceId;event.action="ASSET_RETENTION_DELETED";event.reference=job.id;audit.save(event);
   }
  }
 }

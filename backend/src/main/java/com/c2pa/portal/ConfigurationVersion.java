@@ -10,5 +10,6 @@ public class ConfigurationVersion {
     public Instant createdAt;
     public String action;
     @Column(length=16000) public String settings;
-    public ConfigurationVersion() {}
+    @Column(nullable=false,columnDefinition="bigint default 1") public Long workspaceId=1L;
+ public ConfigurationVersion() {}
 }

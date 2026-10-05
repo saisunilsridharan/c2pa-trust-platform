@@ -11,8 +11,8 @@ import java.util.*;
 @RestController
 @RequestMapping("/api/v1")
 public class AccountsController {
- private final AccountService accounts;private final UserRepository users;private final SessionRepository sessions;private final AuditService audit;
- public AccountsController(AccountService accounts,UserRepository users,SessionRepository sessions,AuditService audit){this.accounts=accounts;this.users=users;this.sessions=sessions;this.audit=audit;}
+ private final AccountService accounts;private final UserRepository users;private final SessionRepository sessions;private final AuditService audit;private final WorkspaceService workspaces;
+ public AccountsController(AccountService accounts,UserRepository users,SessionRepository sessions,AuditService audit,WorkspaceService workspaces){this.accounts=accounts;this.users=users;this.sessions=sessions;this.audit=audit;this.workspaces=workspaces;}
  public record Credentials(@NotBlank @Size(max=40) String username,String password){}
  public record NewUser(@NotBlank String username,String password,@Pattern(regexp="ADMIN|SIGNER|VIEWER") @NotNull String role){}
  public record Access(@Pattern(regexp="ADMIN|SIGNER|VIEWER") @NotNull String role,boolean enabled){}
@@ -20,6 +20,7 @@ public class AccountsController {
  @PostMapping("/auth/login") public AccountService.Login login(@Valid @RequestBody Credentials credentials,HttpServletRequest request){
   var result=accounts.login(credentials.username(),credentials.password());
   if(result==null)throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Invalid credentials or temporarily locked account");
+  try{request.setAttribute("portal.workspaceId",workspaces.select(users.findById(result.user().id()).orElseThrow(),null).id());}catch(ResponseStatusException e){request.setAttribute("portal.workspaceId",0L);}
   request.setAttribute("portal.actor",result.user().username());audit.record("USER_LOGIN",String.valueOf(result.user().id()));return result;
  }
  @io.swagger.v3.oas.annotations.security.SecurityRequirement(name="adminToken")
@@ -27,10 +28,11 @@ public class AccountsController {
   if(accounts.enrolled())throw new ResponseStatusException(HttpStatus.CONFLICT,"Administrator already enrolled");
   var user=accounts.create(credentials.username(),credentials.password(),"ADMIN");audit.record("ADMINISTRATOR_ENROLLED",String.valueOf(user.id));return accounts.profile(user);
  }
+ public record SessionProfile(Long id,String username,String role,boolean enabled,boolean passwordChangeRequired,Long workspaceId,boolean platformAdministrator){}
  @io.swagger.v3.oas.annotations.security.SecurityRequirement(name="adminToken")
- @GetMapping("/auth/me") public AccountService.Profile me(HttpServletRequest request){
-  Long id=(Long)request.getAttribute("portal.userId");
-  return id==null?new AccountService.Profile(null,"bootstrap-administrator","ADMIN",true,false):accounts.profile(users.findById(id).orElseThrow());
+ @GetMapping("/auth/me") public SessionProfile me(HttpServletRequest request){
+  Long id=(Long)request.getAttribute("portal.userId");var user=id==null?null:users.findById(id).orElseThrow();
+  return new SessionProfile(id,user==null?"bootstrap-administrator":user.username,(String)request.getAttribute("portal.role"),user==null || user.enabled,user!=null && user.passwordChangeRequired,(Long)request.getAttribute("portal.workspaceId"),Boolean.TRUE.equals(request.getAttribute("portal.platformAdministrator")));
  }
  @io.swagger.v3.oas.annotations.security.SecurityRequirement(name="adminToken")
  @PostMapping("/auth/logout") public Map<String,Boolean> logout(HttpServletRequest request){accounts.logout((String)request.getAttribute("portal.sessionToken"));audit.record("USER_LOGOUT",String.valueOf(request.getAttribute("portal.userId")));return Map.of("loggedOut",true);}

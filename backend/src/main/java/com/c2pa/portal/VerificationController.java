@@ -23,7 +23,7 @@ public class VerificationController {
  }
  @PostMapping(consumes="multipart/form-data")
  public JsonNode inspect(@RequestPart("file") MultipartFile file) throws Exception {
-  var record=repository.findById(1L).filter(r->r.active!=null)
+  var record=repository.findById(WorkspaceContext.id()).filter(r->r.active!=null)
    .orElseThrow(()->new ResponseStatusException(HttpStatus.CONFLICT,"Activate a profile first"));
   var settings=mapper.readValue(record.active,ConfigurationController.Settings.class);
   if(file.isEmpty() || file.getSize()>settings.maxUploadMb()*1024L*1024)
