@@ -14,7 +14,7 @@ The implemented persistent queue invokes one bounded local Rust process at a tim
 
 ## Completed development signing slice
 
-UI-created development identities, reviewed user declarations, image/audio/video/PDF signed downloads, post-sign validation, original ingredient retention, and tampering checks are implemented. Configuration history/rollback, audit records, and development certificate status/rotation are implemented. Batch jobs, original/signed assets, downloadable validation reports, per-user job access, manual retries, startup recovery, UI retention, and operations diagnostics are implemented for a single local instance. UI PKCS#12 private identity import includes chain/key checks and a real Rust signing probe. Public certificate trust, trusted timestamps, encrypted storage, and hardware key providers remain outstanding.
+UI-created development identities, reviewed user declarations, image/audio/video/PDF signed downloads, post-sign validation, original ingredient retention, and tampering checks are implemented. Configuration history/rollback, audit records, and development certificate status/rotation are implemented. Batch jobs, original/signed assets, downloadable validation reports, per-user job access, manual retries, startup recovery, UI retention, and operations diagnostics are implemented for a single local instance. UI PKCS#12 private identity import includes chain/key checks and a real Rust signing probe. Public certificate trust, trusted timestamps, external asset storage and hardware key providers remain outstanding. Write-only encrypted service credentials and UI encryption-key backup/restore are implemented.
 
 ## Next: production signing vertical slice
 
@@ -44,4 +44,4 @@ End-to-end signing through the UI; unauthorized signing denied; workspace isolat
 
 ## Selected provider direction
 
-The user selected local/private services first. Prioritize private CA and local PKCS#12 signing (implemented), private object storage, local account recovery/session administration (implemented), private OIDC and PKCS#11/HSM adapters, then private trust/timestamp services. Do not label imported certificates publicly trusted without trust-list validation. Connectivity tests and secret-at-rest protection remain prerequisites for external/private service credentials.
+The user selected local/private services first. Prioritize private CA and local PKCS#12 signing (implemented), private object storage, local account recovery/session administration (implemented), private OIDC and PKCS#11/HSM adapters, then private trust/timestamp services. Do not label imported certificates publicly trusted without trust-list validation. Encrypted service credentials and UI master-key backup/recovery are implemented. Provider connectivity tests remain prerequisites for activating integrations.

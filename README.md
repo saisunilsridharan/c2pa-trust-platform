@@ -20,7 +20,7 @@ React + TypeScript portal, Java 21 Spring Boot API with Swagger UI, and a Rust w
 - UI import of password-protected PKCS#12 private CA identities, validated with the actual Rust signing worker.
 - Swagger UI documents the APIs and supports the administrator token through its Authorize button.
 
-KMS/HSM, external storage providers, OIDC/SSO, secret encryption, trusted timestamps, public trust-list validation, and tamper-evident audit storage remain pending. Local private-CA import is supported, but does not establish public trust or provide hardware key protection. Keys cannot be exported through the API. See [the implementation roadmap](docs/implementation-plan.md).
+KMS/HSM, external storage providers, OIDC/SSO, trusted timestamps, public trust-list validation, and tamper-evident audit storage remain pending. Local private-CA import is supported, but does not establish public trust or provide hardware key protection. Keys cannot be exported through the API. See [the implementation roadmap](docs/implementation-plan.md).
 
 ## Development
 
@@ -66,7 +66,7 @@ Database connection configuration is the only application setting supplied outsi
 
 Development defaults to a persistent H2 database in `backend/.local/`. PostgreSQL JDBC support is included but production migrations and PostgreSQL validation are still pending. Automatic schema updates are for development only.
 
-Application settings are stored in the database and survive backend restarts. Bootstrap authentication survives through its protected local token file. No external storage credentials are stored yet. The development signing key stays in owner-only `backend/.local/development-identity/`; this file-based development provider is not suitable for production.
+Application settings are stored in the database and survive backend restarts. Bootstrap authentication survives through its protected local token file. Private-service credentials can be saved through the UI as immutable, write-only AES-256-GCM encrypted records. Platform administrators can download a passphrase-protected encryption-key backup and restore its matching key through the UI. Back up this key and the database together; losing the key makes saved credentials unavailable. The development signing key stays in owner-only `backend/.local/development-identity/`; this file-based development provider is not suitable for production.
 
 ## Administration and recovery
 

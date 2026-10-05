@@ -40,6 +40,7 @@ class WorkspaceTest {
   mvc.perform(get("/api/v1/admin/configuration").header("X-Admin-Token",alice).header("X-Workspace-Id",1)).andExpect(status().isForbidden());
   mvc.perform(get("/api/v1/auth/me").header("X-Admin-Token",alice).header("X-Workspace-Id",studio)).andExpect(jsonPath("$.role").value("ADMIN")).andExpect(jsonPath("$.platformAdministrator").value(false));
   mvc.perform(get("/api/v1/admin/users").header("X-Admin-Token",alice).header("X-Workspace-Id",studio)).andExpect(status().isForbidden());
+  mvc.perform(get("/api/v1/admin/security").header("X-Admin-Token",alice).header("X-Workspace-Id",studio)).andExpect(status().isForbidden());
   activate(platform,1L,"Default private organization");var second=activate(alice,studio,"Studio private organization");
   mvc.perform(get("/api/v1/portal/configuration").header("X-Admin-Token",platform).header("X-Workspace-Id",1)).andExpect(jsonPath("$.active.organizationName").value("Default private organization"));
   mvc.perform(get("/api/v1/admin/configuration/history").header("X-Admin-Token",alice).header("X-Workspace-Id",studio)).andExpect(jsonPath("$.length()").value(1)).andExpect(jsonPath("$[0].settings.organizationName").value("Studio private organization"));

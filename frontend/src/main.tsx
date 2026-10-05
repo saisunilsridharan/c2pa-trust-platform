@@ -8,6 +8,7 @@ import UsersPanel from "./UsersPanel";
 import PasswordPanel from "./PasswordPanel";
 import JobsPanel from "./JobsPanel";
 import WorkspacesPanel from "./WorkspacesPanel";
+import CredentialsPanel from "./CredentialsPanel";
 import { setActiveWorkspace } from "./portalFetch";
 type Capability = {
   mime: string;
@@ -434,6 +435,10 @@ function App() {
                       </button>
                     </div>
                   </section>
+                  <CredentialsPanel
+                    token={token}
+                    platformAdmin={user?.platformAdministrator ?? false}
+                  />
                   <AdministrationPanel
                     token={token}
                     revision={state.revision}

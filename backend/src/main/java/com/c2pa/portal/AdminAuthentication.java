@@ -43,7 +43,7 @@ public class AdminAuthentication extends OncePerRequestFilter {
   Long workspaceId=1L;String role="ADMIN";
   if(bootstrap){if(requested!=null && !requested.equals(1L)){reject(response,403,"Enroll an administrator before selecting workspaces");return;}}
   else {try{var selected=workspaces.select(user.get(),requested);workspaceId=selected.id();role=selected.role();}catch(org.springframework.web.server.ResponseStatusException e){if(!accountRoute){reject(response,403,"Workspace access required");return;}workspaceId=0L;role=user.get().role;}}
-  if(!platformAdmin && (path.startsWith("/api/v1/admin/users") || path.equals("/api/v1/admin/sessions"))){reject(response,403,"Platform administrator required");return;}
+  if(!platformAdmin && (path.startsWith("/api/v1/admin/users") || path.equals("/api/v1/admin/sessions") || path.startsWith("/api/v1/admin/security"))){reject(response,403,"Platform administrator required");return;}
   request.setAttribute("portal.workspaceId",workspaceId);request.setAttribute("portal.platformAdministrator",platformAdmin);
 
   boolean ordinary=java.util.Set.of("/api/v1/auth/me","/api/v1/auth/logout","/api/v1/auth/password","/api/v1/portal/configuration","/api/v1/portal/capabilities","/api/v1/verification").contains(path) || (path.equals("/api/v1/signing") && role.equals("SIGNER"));
