@@ -1,3 +1,4 @@
+import SigningChoicesPanel from "./SigningChoicesPanel";
 import { portalFetch as connectionFetch, workspaceFetch } from "./portalFetch";
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -472,6 +473,11 @@ function App() {
                   <StorageProvidersPanel token={token} />
                   <WebhooksPanel token={token} />
                   <ProcessingPanel token={token} />
+                  <SigningChoicesPanel
+                    token={token}
+                    profileRevision={state.activeRevision}
+                    fingerprint={state.signingFingerprint}
+                  />
                   <AuditIntegrityPanel token={token} />
                   {user?.platformAdministrator && (
                     <OidcAdministrationPanel token={token} />

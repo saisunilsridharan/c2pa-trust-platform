@@ -1,3 +1,7 @@
+import {
+  SigningChoiceSelector,
+  type SigningChoice,
+} from "./SigningChoicesPanel";
 import { workspaceFetch } from "./portalFetch";
 import { useEffect, useState } from "react";
 type Job = {
@@ -15,9 +19,9 @@ export default function JobsPanel({
   canSign,
   admin,
   capabilities,
-  activeProfile,
-  profileRevision,
-  signingFingerprint,
+  activeProfile: defaultProfile,
+  profileRevision: defaultRevision,
+  signingFingerprint: defaultFingerprint,
 }: {
   token: string;
   capabilities: { mime: string; extension: string }[];
@@ -32,6 +36,10 @@ export default function JobsPanel({
   signingFingerprint: string | null;
 }) {
   const fetch = workspaceFetch();
+  const [choice, setChoice] = useState<SigningChoice | null>(null);
+  const activeProfile = choice?.settings ?? defaultProfile,
+    profileRevision = choice?.profileRevision ?? defaultRevision,
+    signingFingerprint = choice?.fingerprint ?? defaultFingerprint;
   const [operations, setOperations] = useState<Record<string, unknown> | null>(
     null,
   );
@@ -75,7 +83,7 @@ export default function JobsPanel({
   }
   useEffect(
     () => setReviewed(false),
-    [activeProfile, profileRevision, signingFingerprint],
+    [activeProfile, profileRevision, signingFingerprint, choice],
   );
   useEffect(() => {
     let active = true;
@@ -134,6 +142,11 @@ export default function JobsPanel({
       </p>
       {canSign && (
         <>
+          <SigningChoiceSelector
+            token={token}
+            value={choice}
+            onChange={setChoice}
+          />
           <label>
             Batch files
             <input
@@ -203,6 +216,7 @@ export default function JobsPanel({
             disabled={
               busy ||
               !activeProfile ||
+              (choice !== null && !choice.available) ||
               !signingFingerprint ||
               !files.length ||
               !creator.trim() ||
@@ -219,6 +233,13 @@ export default function JobsPanel({
                   body.append("title", title);
                   body.append("aiDisclosure", ai);
                   body.append("acknowledgePublicClaims", "true");
+                  if (choice) {
+                    body.append("signingOptionId", choice.id);
+                    body.append(
+                      "signingOptionRevision",
+                      String(choice.revision),
+                    );
+                  }
                   body.append(
                     "expectedProfileRevision",
                     String(profileRevision),

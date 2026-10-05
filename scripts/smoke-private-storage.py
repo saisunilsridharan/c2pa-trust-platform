@@ -212,6 +212,25 @@ def run(postgres_bin=None):
             call('/admin/configuration/draft/activate', {'revision': configuration['revision']})
             call('/admin/signing-identity/development', {'acknowledgeUntrusted': True})
             configuration = call('/portal/configuration')
+            choice = call('/admin/signing-options', {'label': 'Private editorial choice',
+                'expectedProfileRevision': configuration['activeRevision'],
+                'expectedIdentityFingerprint': configuration['signingFingerprint'], 'acknowledgePublicClaims': True})
+            assert choice['available'] and choice['enabled']
+            assert 'keyPath' not in choice and 'certificatePath' not in choice
+            assert call('/portal/signing-options', workspace=workspace) == []
+            denied(lambda: call('/admin/signing-options/' + choice['id'], {'revision': choice['revision'], 'enabled': False}, method='PUT', workspace=workspace), 404)
+            # Default changes must not change an already approved choice.
+            revised = call('/admin/configuration')
+            revised_settings = {**revised['draft'], 'organizationName': 'New default organization', 'profileName': 'New default profile'}
+            revised = call('/admin/configuration/draft', {'revision': revised['revision'], 'settings': revised_settings}, method='PUT')
+            call('/admin/configuration/draft/activate', {'revision': revised['revision']})
+            call('/admin/signing-identity/development/rotate', {'expectedFingerprint': configuration['signingFingerprint'], 'acknowledgeUntrusted': True})
+            alternate = call('/portal/configuration')
+            second_choice = call('/admin/signing-options', {'label': 'New certificate choice',
+                'expectedProfileRevision': alternate['activeRevision'],
+                'expectedIdentityFingerprint': alternate['signingFingerprint'], 'acknowledgePublicClaims': True})
+            assert second_choice['fingerprint'] != choice['fingerprint']
+            assert len(call('/portal/signing-options')) == 2
             processing = call('/admin/processing')
             call('/admin/processing', {**processing, 'workerTimeoutSeconds': 30, 'maxAttempts': 2}, method='PUT')
             checkpoint = call('/admin/audit-integrity/checkpoint')
@@ -220,14 +239,29 @@ def run(postgres_bin=None):
             png += chunk(b'IDAT', zlib.compress((b'\0' + b'\xff\0\0' * 2) * 2)) + chunk(b'IEND', b'')
             fields = {'creator': 'Private fixture', 'title': 'Private storage test', 'aiDisclosure': 'none',
                       'acknowledgePublicClaims': 'true', 'expectedProfileRevision': configuration['activeRevision'],
-                      'expectedIdentityFingerprint': configuration['signingFingerprint']}
+                      'expectedIdentityFingerprint': configuration['signingFingerprint'],
+                      'signingOptionId': choice['id'], 'signingOptionRevision': choice['revision']}
             data, headers = multipart(fields, 'sample.png', png)
             session = token
             api_key = call('/auth/api-keys', {'label': 'Isolated worker integration', 'scopes': ['READ', 'SIGN', 'VERIFY'], 'days': 1})
             token = api_key['token']
             denied(lambda: call('/admin/storage/providers'), 403)
             denied(lambda: call('/jobs', workspace=workspace), 403)
-            job = call('/jobs', data=data, extra={**headers, 'Idempotency-Key': secrets.token_hex(16)})
+            assert len(call('/portal/signing-options')) == 2
+            stale_data, stale_headers = multipart({**fields, 'signingOptionRevision': choice['revision'] + 1}, 'sample.png', png)
+            denied(lambda: call('/jobs', data=stale_data, extra={**stale_headers, 'Idempotency-Key': secrets.token_hex(16)}), 409)
+            request_key = secrets.token_hex(16)
+            job = call('/jobs', data=data, extra={**headers, 'Idempotency-Key': request_key})
+            assert call('/jobs', data=data, extra={**headers, 'Idempotency-Key': request_key})['id'] == job['id']
+            changed_data, changed_headers = multipart({**fields, 'signingOptionId': second_choice['id'],
+                'signingOptionRevision': second_choice['revision'], 'expectedProfileRevision': second_choice['profileRevision'],
+                'expectedIdentityFingerprint': second_choice['fingerprint']}, 'sample.png', png)
+            denied(lambda: call('/jobs', data=changed_data, extra={**changed_headers, 'Idempotency-Key': request_key}), 409)
+            token = session
+            choice = call('/admin/signing-options/' + choice['id'], {'revision': choice['revision'], 'enabled': False}, method='PUT')
+            assert len(call('/portal/signing-options')) == 1
+            denied(lambda: call('/jobs', data=data, extra={**headers, 'Idempotency-Key': secrets.token_hex(16)}), 409)
+            token = api_key['token']
             until = time.monotonic() + 50
             while time.monotonic() < until:
                 job = next(j for j in call('/jobs') if j['id'] == job['id'])
@@ -238,6 +272,8 @@ def run(postgres_bin=None):
             assert call(f'/jobs/{job["id"]}/download?version=original', raw=True) == png
             report = json.loads(call(f'/jobs/{job["id"]}/report', raw=True))
             assert report['validation_state'] == 'Valid'
+            assert choice['id'] in json.dumps(report)
+            assert 'New default organization' not in json.dumps(report)
             signed = call(f'/jobs/{job["id"]}/download', raw=True)
             token = session
             until = time.monotonic() + 20
@@ -297,7 +333,7 @@ def run(postgres_bin=None):
             data, headers = multipart({'password': backup_password, 'acknowledgeRestore': 'true'}, 'key.backup', backup)
             assert call('/admin/security/restore', data=data, extra=headers)['available']
             assert call(f'/jobs/{job["id"]}/download', raw=True) == signed
-            print(('PostgreSQL' if postgres_bin else 'H2') + ': MFA, one-time account recovery, migrations, leased native C2PA job, private storage, SigV4, scoped API-key signing/revocation, provider snapshots, notifications, HMAC webhooks, audit checkpoint, workspace isolation, restart persistence and encryption-key recovery passed.')
+            print(('PostgreSQL' if postgres_bin else 'H2') + ': approved signing choices/rotation/withdrawal, MFA, one-time account recovery, migrations, leased native C2PA job, private storage, SigV4, scoped API-key signing/revocation, provider snapshots, notifications, HMAC webhooks, audit checkpoint, workspace isolation, restart persistence and encryption-key recovery passed.')
         finally:
             stop(); fixture.shutdown(); fixture.server_close()
             if postgres is not None:

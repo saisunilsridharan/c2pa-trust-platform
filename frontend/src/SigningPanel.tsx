@@ -1,3 +1,7 @@
+import {
+  SigningChoiceSelector,
+  type SigningChoice,
+} from "./SigningChoicesPanel";
 import { workspaceFetch } from "./portalFetch";
 import { useEffect, useState } from "react";
 type Props = {
@@ -18,10 +22,12 @@ export default function SigningPanel({
   capabilities,
   canConfigure,
   onConfigured,
-  active,
+  active: defaultActive,
   available: initialAvailable,
 }: Props) {
   const fetch = workspaceFetch();
+  const [choice, setChoice] = useState<SigningChoice | null>(null);
+  const active = choice?.settings ?? defaultActive;
   const [available, setAvailable] = useState(initialAvailable),
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
@@ -31,7 +37,7 @@ export default function SigningPanel({
     [title, setTitle] = useState(""),
     [ai, setAi] = useState("unspecified"),
     [reviewed, setReviewed] = useState(false);
-  useEffect(() => setReviewed(false), [active]);
+  useEffect(() => setReviewed(false), [active, choice]);
   useEffect(() => setAvailable(initialAvailable), [initialAvailable]);
   async function run(action: () => Promise<void>) {
     setBusy(true);
@@ -47,6 +53,11 @@ export default function SigningPanel({
   return (
     <section>
       <h2>Sign content</h2>
+      <SigningChoiceSelector
+        token={token}
+        value={choice}
+        onChange={setChoice}
+      />
       <div className="notice">
         Public trust has not been verified for the active identity. There is no
         trusted timestamp. Your declarations will be embedded publicly.
@@ -169,7 +180,7 @@ export default function SigningPanel({
       <button
         disabled={
           busy ||
-          !available ||
+          !(choice ? choice.available : available) ||
           !active ||
           !file ||
           !creator.trim() ||
@@ -186,6 +197,15 @@ export default function SigningPanel({
             body.append("title", title);
             body.append("aiDisclosure", ai);
             body.append("acknowledgePublicClaims", "true");
+            if (choice) {
+              body.append("signingOptionId", choice.id);
+              body.append("signingOptionRevision", String(choice.revision));
+              body.append(
+                "expectedProfileRevision",
+                String(choice.profileRevision),
+              );
+              body.append("expectedIdentityFingerprint", choice.fingerprint);
+            }
             const response = await fetch("/api/v1/signing", {
               method: "POST",
               headers: { "X-Admin-Token": token },

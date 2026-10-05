@@ -19,24 +19,27 @@ public class JobService {
  private final Path storage=Path.of(".local/assets").toAbsolutePath();
  private final StorageVersionRepository storageVersions;private final PrivateObjectStorage objects;
  private final JobCompletion completion;
- private final JobLeases leases;private final ProcessingRepository processing;
- public JobService(JobRepository jobs,ConfigurationRepository configs,DevelopmentIdentity identity,ObjectMapper mapper,AuditService audit,StorageRepository retention,StorageVersionRepository storageVersions,PrivateObjectStorage objects,JobCompletion completion,JobLeases leases,ProcessingRepository processing){this.jobs=jobs;this.configs=configs;this.identity=identity;this.mapper=mapper;this.audit=audit;this.retention=retention;this.storageVersions=storageVersions;this.objects=objects;this.completion=completion;this.leases=leases;this.processing=processing;}
+ private final SigningChoices choices;private final JobLeases leases;private final ProcessingRepository processing;
+ public JobService(JobRepository jobs,ConfigurationRepository configs,DevelopmentIdentity identity,ObjectMapper mapper,AuditService audit,StorageRepository retention,StorageVersionRepository storageVersions,PrivateObjectStorage objects,JobCompletion completion,JobLeases leases,ProcessingRepository processing,SigningChoices choices){this.choices=choices;this.jobs=jobs;this.configs=configs;this.identity=identity;this.mapper=mapper;this.audit=audit;this.retention=retention;this.storageVersions=storageVersions;this.objects=objects;this.completion=completion;this.leases=leases;this.processing=processing;}
  public Path directory(String id){UUID.fromString(id);return storage.resolve(id);}
  public synchronized SigningJob submit(MultipartFile file,String creator,String title,String ai,String owner,String requestId,Long expectedProfileRevision,String expectedIdentityFingerprint) throws Exception {
+  return submit(file,creator,title,ai,owner,requestId,expectedProfileRevision,expectedIdentityFingerprint,null,null);
+ }
+ public synchronized SigningJob submit(MultipartFile file,String creator,String title,String ai,String owner,String requestId,Long expectedProfileRevision,String expectedIdentityFingerprint,String optionId,Long optionRevision) throws Exception {
   if(creator.isBlank() || creator.length()>120 || title.isBlank() || title.length()>200 || !Set.of("none","generated","edited","unspecified").contains(ai))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid public claims");
   if(!requestId.matches("[a-zA-Z0-9-]{1,80}"))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid request identifier");
   String requestKey=WorkspaceContext.id()+":"+owner+":"+requestId;
   MessageDigest digest=MessageDigest.getInstance("SHA-256");try(var input=file.getInputStream()){byte[] buffer=new byte[8192];int n;while((n=input.read(buffer))!=-1)digest.update(buffer,0,n);}
   String contentHash=HexFormat.of().formatHex(digest.digest());
-  digest.update((contentHash+mapper.writeValueAsString(List.of(creator,title,ai))).getBytes(java.nio.charset.StandardCharsets.UTF_8));String requestDigest=HexFormat.of().formatHex(digest.digest());
+  digest.update((contentHash+mapper.writeValueAsString(List.of(creator,title,ai))+(optionId==null || optionId.isBlank()?"":mapper.writeValueAsString(List.of(optionId,Objects.requireNonNullElse(optionRevision,-1L),Objects.requireNonNullElse(expectedProfileRevision,-1L),Objects.requireNonNullElse(expectedIdentityFingerprint,""))))).getBytes(java.nio.charset.StandardCharsets.UTF_8));String requestDigest=HexFormat.of().formatHex(digest.digest());
   var existing=jobs.findByRequestKey(requestKey);if(existing.isEmpty() && WorkspaceContext.id().equals(1L))existing=jobs.findByRequestKey(owner+":"+requestId);if(existing.isPresent()){if(!Objects.equals(existing.get().requestDigest,requestDigest))throw new ResponseStatusException(HttpStatus.CONFLICT,"Request key already used for different content or claims");return existing.get();}
-  var record=configs.findById(WorkspaceContext.id()).filter(c->c.active!=null).orElseThrow(()->new ResponseStatusException(HttpStatus.CONFLICT,"Activate a profile first"));
-  var settings=mapper.readValue(record.active,ConfigurationController.Settings.class);
+  var selected=choices.select(optionId,optionRevision);
+  var settings=selected.settings();
   if(settings.requireAiDisclosure() && ai.equals("unspecified"))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"AI declaration required");
   if(file.isEmpty() || file.getSize()>settings.maxUploadMb()*1024L*1024)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"File exceeds profile limits");
   String format=ContentFormats.detect(file);
   if(format==null || !settings.formats().contains(format))throw new ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE,"Unsupported or disabled format");
-  var material=identity.material();if(!Objects.equals(expectedProfileRevision,record.activeRevision==null?record.revision:record.activeRevision) || !Objects.equals(expectedIdentityFingerprint,material.fingerprint()))throw new ResponseStatusException(HttpStatus.CONFLICT,"Profile or identity changed; reload and review public claims again");SigningJob job=new SigningJob();job.id=UUID.randomUUID().toString();job.owner=owner;job.workspaceId=WorkspaceContext.id();job.requestKey=requestKey;job.requestDigest=requestDigest;job.state="QUEUED";job.format=format;job.title=title;job.fingerprint=material.fingerprint();job.certificatePath=material.certificate().toString();job.keyPath=material.key().toString();job.createdAt=Instant.now();
+  var material=selected.material();if(!Objects.equals(expectedProfileRevision,selected.profileRevision()) || !Objects.equals(expectedIdentityFingerprint,material.fingerprint()))throw new ResponseStatusException(HttpStatus.CONFLICT,"Profile or identity changed; reload and review public claims again");SigningJob job=new SigningJob();job.id=UUID.randomUUID().toString();job.owner=owner;job.workspaceId=WorkspaceContext.id();job.requestKey=requestKey;job.requestDigest=requestDigest;job.state="QUEUED";job.format=format;job.title=title;job.fingerprint=material.fingerprint();job.certificatePath=material.certificate().toString();job.keyPath=material.key().toString();job.createdAt=Instant.now();
   Files.createDirectories(storage);Files.setPosixFilePermissions(storage,java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
   Path directory=directory(job.id);Files.createDirectory(directory,java.nio.file.attribute.PosixFilePermissions.asFileAttribute(java.nio.file.attribute.PosixFilePermissions.fromString("rwx------")));
   try {
@@ -44,7 +47,8 @@ public class JobService {
    var activeStorage=retention.findById(job.workspaceId).map(s->s.activeVersion).orElse(null);
    if(activeStorage!=null)job.storageSnapshot=storageVersions.findById(activeStorage).filter(v->v.workspaceId.equals(job.workspaceId)).orElseThrow().configuration;
    file.transferTo(directory.resolve("original"+extension(job)));
-   var data=Map.of("creator",creator,"organization",settings.organizationName(),"profile",settings.profileName(),"configurationRevision",record.activeRevision==null?record.revision:record.activeRevision,"aiDisclosure",ai,"source","user-declared","developmentIdentity",material.development());
+   var data=new LinkedHashMap<String,Object>(Map.of("creator",creator,"organization",settings.organizationName(),"profile",settings.profileName(),"configurationRevision",selected.profileRevision(),"aiDisclosure",ai,"source","user-declared","developmentIdentity",material.development()));
+   if(selected.optionId()!=null){data.put("signingChoiceId",selected.optionId());data.put("signingChoiceRevision",selected.optionRevision());}
    Files.writeString(directory.resolve("manifest.json"),mapper.writeValueAsString(Map.of("claim_generator_info",List.of(Map.of("name","C2PA Trust Portal","version","0.3.0")),"title",title,"format",format,"assertions",List.of(Map.of("label","com.c2pa.portal.declarations","data",data)))));
    objects.write(job,"original"+extension(job),directory.resolve("original"+extension(job)));
    return jobs.saveAndFlush(job);
