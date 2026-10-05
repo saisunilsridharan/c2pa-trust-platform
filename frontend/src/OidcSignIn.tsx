@@ -1,3 +1,4 @@
+import { authenticationRetry } from "./authenticationRetry";
 import { useEffect, useState } from "react";
 import { portalFetch } from "./portalFetch";
 export default function OidcSignIn({
@@ -41,7 +42,8 @@ export default function OidcSignIn({
       });
       if (!response.ok)
         throw new Error(
-          "Private login is unavailable. Check the provider configuration or use password login.",
+          authenticationRetry(response) ??
+            "Private login is unavailable. Check the provider configuration or use password login.",
         );
       const result = await response.json();
       window.location.assign(result.authorizationUrl);
@@ -65,7 +67,8 @@ export default function OidcSignIn({
       });
       if (!response.ok)
         throw new Error(
-          "Private login failed. Check account linking and your second factor, then start a fresh provider login.",
+          authenticationRetry(response) ??
+            "Private login failed. Check account linking and your second factor, then start a fresh provider login.",
         );
       const session = await response.json();
       await onSignedIn(session.token);

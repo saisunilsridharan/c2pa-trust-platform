@@ -1,3 +1,5 @@
+import { authenticationRetry } from "./authenticationRetry";
+import AuthenticationLimitsPanel from "./AuthenticationLimitsPanel";
 import AuditStoragePanel from "./AuditStoragePanel";
 import TimestampsPanel from "./TimestampsPanel";
 import TrustPolicyPanel from "./TrustPolicyPanel";
@@ -254,7 +256,8 @@ function App() {
                   });
                   if (!response.ok)
                     throw new Error(
-                      "Login failed. Check credentials or try again after the lockout period.",
+                      authenticationRetry(response) ??
+                        "Login failed. Check credentials or try again after the lockout period.",
                     );
                   const session = await response.json();
                   await connect(session.token);
@@ -491,7 +494,10 @@ function App() {
                   />
                   <AuditIntegrityPanel token={token} />
                   {user?.platformAdministrator && (
-                    <OidcAdministrationPanel token={token} />
+                    <>
+                      <OidcAdministrationPanel token={token} />
+                      <AuthenticationLimitsPanel token={token} />
+                    </>
                   )}
                   <AdministrationPanel
                     token={token}

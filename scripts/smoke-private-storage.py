@@ -230,7 +230,7 @@ def initialize_token(command, environment, so_pin, user_pin):
 def chunk(kind, data):
     return struct.pack('!I', len(data)) + kind + data + struct.pack('!I', zlib.crc32(kind + data))
 
-def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, formats=False, audit_lock=False, certificates=False):
+def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, formats=False, audit_lock=False, certificates=False, rate_limits=False):
     global LOCK_MODE
     global TSA_MODE
     assert (ROOT / 'backend/target/portal-api-0.1.0.jar').is_file(), 'Build the Java API first'
@@ -598,6 +598,30 @@ def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, 
             data, headers = multipart({'password': backup_password, 'acknowledgeRestore': 'true'}, 'key.backup', backup)
             assert call('/admin/security/restore', data=data, extra=headers)['available']
             assert call(f'/jobs/{job["id"]}/download', raw=True) == signed
+            if rate_limits:
+                rate_policy = call('/admin/authentication/rate-limits')
+                restricted = {**rate_policy, 'windowSeconds': 300, 'perAddressLimit': 5, 'globalLimit': 1000, 'trustedProxyCidrs': ''}
+                denied(lambda: call('/admin/authentication/rate-limits', {**restricted, 'trustedProxyCidrs': 'example.com/24'}, method='PUT'), 400)
+                rate_policy = call('/admin/authentication/rate-limits', restricted, method='PUT')
+                denied(lambda: call('/admin/authentication/rate-limits', restricted, method='PUT'), 409)
+                # Earlier authentication attempts already count against the direct peer.
+                denied(lambda: call('/auth/login', {'username': 'unknown-user', 'password': secrets.token_urlsafe(18)}, extra={'X-Forwarded-For': '198.51.100.1'}), 429)
+                rate_policy = call('/admin/authentication/rate-limits', {**rate_policy, 'trustedProxyCidrs': '127.0.0.1/32'}, method='PUT')
+                for _ in range(5):
+                    denied(lambda: call('/auth/login', {'username': 'unknown-user', 'password': secrets.token_urlsafe(18)}, extra={'X-Forwarded-For': '198.51.100.1'}), 401)
+                try:
+                    call('/auth/login', {'username': 'unknown-user', 'password': secrets.token_urlsafe(18)}, extra={'X-Forwarded-For': '198.51.100.1'})
+                    raise AssertionError('Rate limit did not reject exhausted peer')
+                except urllib.error.HTTPError as error:
+                    assert error.code == 429 and 1 <= int(error.headers['Retry-After']) <= 301
+                # OIDC and recovery share the same client budget before controller side effects.
+                denied(lambda: call('/auth/oidc/start', {}, extra={'X-Forwarded-For': '198.51.100.1'}), 429)
+                denied(lambda: call('/auth/recovery', {}, extra={'X-Forwarded-For': '198.51.100.1'}), 429)
+                denied(lambda: call('/auth/login', {'username': 'unknown-user', 'password': secrets.token_urlsafe(18)}, extra={'X-Forwarded-For': '198.51.100.2'}), 401)
+                restored_rate_policy = call('/admin/authentication/rate-limits', {**rate_policy, 'windowSeconds': 60, 'perAddressLimit': 300, 'globalLimit': 1000, 'trustedProxyCidrs': ''}, method='PUT')
+                stop(); start()
+                assert call('/admin/authentication/rate-limits') == restored_rate_policy
+                print('Shared authentication limits: UI policy/stale revisions, unknown-account throttling, spoofed/untrusted headers, trusted-proxy clients, OIDC/recovery budget and restart persistence passed.', flush=True)
             if audit_lock:
                 anchor_state = call('/admin/audit-storage')
                 anchor_config = {'enabled': True, 'storage': {**settings, 'endpoint': f'http://127.0.0.1:{lock_server.server_port}', 'bucket': 'portal-audits'}, 'retentionDays': 30, 'intervalMinutes': 60}
@@ -737,5 +761,6 @@ if __name__ == '__main__':
     parser.add_argument('--formats', action='store_true', help='Exercise all nine embedded formats, re-signing and tamper detection with the selected identity')
     parser.add_argument('--audit-lock', action='store_true', help='Test protected audit checkpoint storage with an independent S3 Object Lock protocol fixture')
     parser.add_argument('--certificates', action='store_true', help='Test token-signed CSR and immutable certificate renewal with an independent OpenSSL private CA')
+    parser.add_argument('--rate-limits', action='store_true', help='Verify UI-configured shared authentication throttling and trusted-proxy policy')
     args = parser.parse_args()
-    run(args.postgres_bin, args.softhsm_dir, args.timestamps, args.namespace, args.formats, args.audit_lock, args.certificates)
+    run(args.postgres_bin, args.softhsm_dir, args.timestamps, args.namespace, args.formats, args.audit_lock, args.certificates, args.rate_limits)

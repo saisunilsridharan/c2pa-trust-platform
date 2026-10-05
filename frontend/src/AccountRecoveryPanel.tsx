@@ -1,3 +1,4 @@
+import { authenticationRetry } from "./authenticationRetry";
 import { useState } from "react";
 import { portalFetch } from "./portalFetch";
 export default function AccountRecoveryPanel() {
@@ -23,7 +24,8 @@ export default function AccountRecoveryPanel() {
       });
       if (!response.ok)
         throw new Error(
-          "Recovery failed. Check the key and second factor, or contact your administrator.",
+          authenticationRetry(response) ??
+            "Recovery failed. Check the key and second factor, or contact your administrator.",
         );
       setMessage(
         "Password replaced and existing sessions/API keys revoked. Sign in with the new password and a fresh second-factor code.",
