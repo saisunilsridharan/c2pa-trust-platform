@@ -18,6 +18,12 @@ public class SigningJob {
  public Instant createdAt;
  public Instant completedAt;
  public int attempts;
+ @Column(nullable=false,columnDefinition="integer default 10") public int maxAttempts=10;
+ @Column(nullable=false,columnDefinition="integer default 45") public int workerTimeoutSeconds=45;
+ public String leaseToken;
+ public Instant leaseUntil;
+ public String resultAttempt;
+ @Column(length=8000) public String attemptDirectories;
  @Column(length=16000) public String storageSnapshot;
  @Column(nullable=false,columnDefinition="bigint default 1") public Long workspaceId=1L;
  public SigningJob(){}

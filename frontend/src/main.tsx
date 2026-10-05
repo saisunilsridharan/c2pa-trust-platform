@@ -13,6 +13,8 @@ import StorageProvidersPanel from "./StorageProvidersPanel";
 import ApiKeysPanel from "./ApiKeysPanel";
 import NotificationsPanel from "./NotificationsPanel";
 import WebhooksPanel from "./WebhooksPanel";
+import ProcessingPanel from "./ProcessingPanel";
+import AuditIntegrityPanel from "./AuditIntegrityPanel";
 import { setActiveWorkspace } from "./portalFetch";
 type Capability = {
   mime: string;
@@ -449,6 +451,8 @@ function App() {
                   />
                   <StorageProvidersPanel token={token} />
                   <WebhooksPanel token={token} />
+                  <ProcessingPanel token={token} />
+                  <AuditIntegrityPanel token={token} />
                   <AdministrationPanel
                     token={token}
                     revision={state.revision}

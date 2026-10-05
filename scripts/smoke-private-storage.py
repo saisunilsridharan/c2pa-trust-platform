@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import http.server
 import json
+import os
 from pathlib import Path
 import secrets
 import shutil
@@ -97,7 +98,7 @@ class S3(http.server.BaseHTTPRequestHandler):
 def chunk(kind, data):
     return struct.pack('!I', len(data)) + kind + data + struct.pack('!I', zlib.crc32(kind + data))
 
-def run():
+def run(postgres_bin=None):
     assert (ROOT / 'backend/target/portal-api-0.1.0.jar').is_file(), 'Build the Java API first'
     assert (ROOT / 'c2pa-worker/target/debug/c2pa-worker').is_file(), 'Build the Rust worker first'
     with tempfile.TemporaryDirectory(prefix='c2pa-private-storage-') as temporary:
@@ -111,10 +112,31 @@ def run():
         application = None
         log = (sandbox / 'application.log').open('wb')
         token = ''
+        postgres = None
+        application_environment = os.environ.copy()
+        if postgres_bin:
+            binaries = Path(postgres_bin)
+            assert (binaries / 'initdb').is_file() and (binaries / 'postgres').is_file(), 'Provide PostgreSQL server binaries'
+            password_file = sandbox / 'postgres-password'
+            database_password = secrets.token_hex(32)
+            password_file.write_text(database_password); password_file.chmod(0o600)
+            subprocess.run([str(binaries / 'initdb'), '-D', str(sandbox / 'postgres-data'), '-U', 'portal_test',
+                            '--auth-host=scram-sha-256', '--auth-local=trust', '--pwfile=' + str(password_file),
+                            '--no-locale', '--encoding=UTF8'], stdout=log, stderr=log, check=True)
+            password_file.unlink()
+            with socket.socket() as listener:
+                listener.bind(('127.0.0.1', 0)); database_port = listener.getsockname()[1]
+            sockets = sandbox / 'postgres-sockets'; sockets.mkdir(mode=0o700)
+            postgres = subprocess.Popen([str(binaries / 'postgres'), '-D', str(sandbox / 'postgres-data'),
+                                         '-h', '127.0.0.1', '-p', str(database_port), '-k', str(sockets)], stdout=log, stderr=log)
+            application_environment.update(DB_URL=f'jdbc:postgresql://127.0.0.1:{database_port}/postgres',
+                                           DB_USER='portal_test', DB_PASSWORD=database_password)
+        else:
+            application_environment.update(DB_URL='jdbc:h2:file:./.local/portal', DB_USER='sa', DB_PASSWORD='')
         def start():
             nonlocal application
             application = subprocess.Popen(['java', '-jar', str(ROOT / 'backend/target/portal-api-0.1.0.jar'),
-                                             f'--server.port={port}'], cwd=backend, stdout=log, stderr=log)
+                                             f'--server.port={port}'], cwd=backend, stdout=log, stderr=log, env=application_environment)
             until = time.monotonic() + 60
             while time.monotonic() < until:
                 if application.poll() is not None:
@@ -189,6 +211,10 @@ def run():
             call('/admin/configuration/draft/activate', {'revision': configuration['revision']})
             call('/admin/signing-identity/development', {'acknowledgeUntrusted': True})
             configuration = call('/portal/configuration')
+            processing = call('/admin/processing')
+            call('/admin/processing', {**processing, 'workerTimeoutSeconds': 30, 'maxAttempts': 2}, method='PUT')
+            checkpoint = call('/admin/audit-integrity/checkpoint')
+            assert call('/admin/audit-integrity')['valid']
             png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('!2I5B', 2, 2, 8, 2, 0, 0, 0))
             png += chunk(b'IDAT', zlib.compress((b'\0' + b'\xff\0\0' * 2) * 2)) + chunk(b'IEND', b'')
             fields = {'creator': 'Private fixture', 'title': 'Private storage test', 'aiDisclosure': 'none',
@@ -242,15 +268,23 @@ def run():
             assert call('/notifications')['unread'] == 0
             assert call('/notifications')['items'][0]['readAt']
             assert call('/admin/webhooks/deliveries')[0]['state'] == 'DELIVERED'
+            assert call('/admin/audit-integrity/checkpoint/verify', checkpoint)['valid']
+            assert call('/admin/processing')['maxAttempts'] == 2
             (backend / '.local/credential-key').unlink()
             assert call('/admin/security')['state'] == 'RESTORE_REQUIRED'
             denied(lambda: call(f'/jobs/{job["id"]}/download', raw=True), 503)
             data, headers = multipart({'password': backup_password, 'acknowledgeRestore': 'true'}, 'key.backup', backup)
             assert call('/admin/security/restore', data=data, extra=headers)['available']
             assert call(f'/jobs/{job["id"]}/download', raw=True) == signed
-            print('Private storage APIs, SigV4, scoped API-key signing/revocation, native C2PA job, provider snapshots, notifications, HMAC webhooks, workspace isolation, restart persistence and encryption-key recovery passed.')
+            print(('PostgreSQL' if postgres_bin else 'H2') + ': migrations, leased native C2PA job, private storage, SigV4, scoped API-key signing/revocation, provider snapshots, notifications, HMAC webhooks, audit checkpoint, workspace isolation, restart persistence and encryption-key recovery passed.')
         finally:
-            stop(); fixture.shutdown(); fixture.server_close(); log.close()
+            stop(); fixture.shutdown(); fixture.server_close()
+            if postgres is not None:
+                postgres.terminate(); postgres.wait(15)
+            log.close()
 
 if __name__ == '__main__':
-    run()
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--postgres-bin', help='Directory containing initdb and postgres; creates a private temporary cluster')
+    run(parser.parse_args().postgres_bin)

@@ -55,7 +55,8 @@ public class PrivateObjectStorage {
  }
  public Configuration decode(String snapshot)throws Exception{return snapshot==null?null:mapper.readValue(snapshot,Configuration.class);}
  public boolean remote(SigningJob job)throws Exception{var c=decode(job.storageSnapshot);return c!=null && c.provider().equals("S3");}
- private String key(SigningJob job,Configuration c,String name){if(!Set.of("original"+ContentFormats.extension(job.format),"signed"+ContentFormats.extension(job.format),"report.json").contains(name))throw new IllegalArgumentException();return c.prefix()+"/workspace-"+job.workspaceId+"/jobs/"+job.id+"/"+name;}
+ private String key(SigningJob job,Configuration c,String name){return key(job,c,name,job.resultAttempt);}
+ private String key(SigningJob job,Configuration c,String name,String attempt){if(!Set.of("original"+ContentFormats.extension(job.format),"signed"+ContentFormats.extension(job.format),"report.json").contains(name))throw new IllegalArgumentException();String path=c.prefix()+"/workspace-"+job.workspaceId+"/jobs/"+job.id+"/";if(!name.startsWith("original") && attempt!=null){UUID.fromString(attempt);path+="attempts/"+attempt+"/";}return path+name;}
  public void write(SigningJob job,String name,Path file)throws Exception{
   if(!remote(job))return;var c=decode(job.storageSnapshot);try(var client=client(job.workspaceId,c)){client.putObject(PutObjectRequest.builder().bucket(c.bucket()).key(key(job,c,name)).build(),RequestBody.fromFile(file));}
  }
@@ -66,6 +67,6 @@ public class PrivateObjectStorage {
   }catch(ResponseStatusException e){throw e;}catch(Exception e){throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Private object storage is unavailable");}
  }
  public void delete(SigningJob job)throws Exception{
-  if(!remote(job))return;var c=decode(job.storageSnapshot);try(var client=client(job.workspaceId,c)){for(String name:List.of("original"+ContentFormats.extension(job.format),"signed"+ContentFormats.extension(job.format),"report.json"))client.deleteObject(DeleteObjectRequest.builder().bucket(c.bucket()).key(key(job,c,name)).build());}
+  if(!remote(job))return;var c=decode(job.storageSnapshot);try(var client=client(job.workspaceId,c)){for(String name:List.of("original"+ContentFormats.extension(job.format),"signed"+ContentFormats.extension(job.format),"report.json"))client.deleteObject(DeleteObjectRequest.builder().bucket(c.bucket()).key(key(job,c,name,null)).build());if(job.attemptDirectories!=null)for(String attempt:job.attemptDirectories.split(","))for(String name:List.of("signed"+ContentFormats.extension(job.format),"report.json"))client.deleteObject(DeleteObjectRequest.builder().bucket(c.bucket()).key(key(job,c,name,attempt)).build());}
  }
 }

@@ -15,11 +15,12 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 @Service
 public class JobService {
- private final JobRepository jobs;private final ConfigurationRepository configs;private final DevelopmentIdentity identity;private final ObjectMapper mapper;private final AuditRepository audit;private final StorageRepository retention;
+ private final JobRepository jobs;private final ConfigurationRepository configs;private final DevelopmentIdentity identity;private final ObjectMapper mapper;private final AuditService audit;private final StorageRepository retention;
  private final Path storage=Path.of(".local/assets").toAbsolutePath();
  private final StorageVersionRepository storageVersions;private final PrivateObjectStorage objects;
  private final JobCompletion completion;
- public JobService(JobRepository jobs,ConfigurationRepository configs,DevelopmentIdentity identity,ObjectMapper mapper,AuditRepository audit,StorageRepository retention,StorageVersionRepository storageVersions,PrivateObjectStorage objects,JobCompletion completion){this.jobs=jobs;this.configs=configs;this.identity=identity;this.mapper=mapper;this.audit=audit;this.retention=retention;this.storageVersions=storageVersions;this.objects=objects;this.completion=completion;}
+ private final JobLeases leases;private final ProcessingRepository processing;
+ public JobService(JobRepository jobs,ConfigurationRepository configs,DevelopmentIdentity identity,ObjectMapper mapper,AuditService audit,StorageRepository retention,StorageVersionRepository storageVersions,PrivateObjectStorage objects,JobCompletion completion,JobLeases leases,ProcessingRepository processing){this.jobs=jobs;this.configs=configs;this.identity=identity;this.mapper=mapper;this.audit=audit;this.retention=retention;this.storageVersions=storageVersions;this.objects=objects;this.completion=completion;this.leases=leases;this.processing=processing;}
  public Path directory(String id){UUID.fromString(id);return storage.resolve(id);}
  public synchronized SigningJob submit(MultipartFile file,String creator,String title,String ai,String owner,String requestId,Long expectedProfileRevision,String expectedIdentityFingerprint) throws Exception {
   if(creator.isBlank() || creator.length()>120 || title.isBlank() || title.length()>200 || !Set.of("none","generated","edited","unspecified").contains(ai))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid public claims");
@@ -39,6 +40,7 @@ public class JobService {
   Files.createDirectories(storage);Files.setPosixFilePermissions(storage,java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
   Path directory=directory(job.id);Files.createDirectory(directory,java.nio.file.attribute.PosixFilePermissions.asFileAttribute(java.nio.file.attribute.PosixFilePermissions.fromString("rwx------")));
   try {
+   processing.findById(job.workspaceId).ifPresent(p->{job.workerTimeoutSeconds=p.workerTimeoutSeconds;job.maxAttempts=p.maxAttempts;});
    var activeStorage=retention.findById(job.workspaceId).map(s->s.activeVersion).orElse(null);
    if(activeStorage!=null)job.storageSnapshot=storageVersions.findById(activeStorage).filter(v->v.workspaceId.equals(job.workspaceId)).orElseThrow().configuration;
    file.transferTo(directory.resolve("original"+extension(job)));
@@ -49,15 +51,15 @@ public class JobService {
   } catch(Exception e){try{objects.delete(job);}catch(Exception cleanup){e.addSuppressed(cleanup);}try(var paths=Files.list(directory)){for(Path p:paths.toList())Files.deleteIfExists(p);}Files.delete(directory);throw e;}
  }
  public String extension(SigningJob job){return ContentFormats.extension(job.format);}
- @EventListener(ApplicationReadyEvent.class) public void recover(){for(var job:jobs.findByStateOrderByCreatedAtAsc("RUNNING",PageRequest.of(0,10000))){job.state="QUEUED";jobs.save(job);}}
+ @EventListener(ApplicationReadyEvent.class) @Scheduled(cron="${portal.jobs.recovery.schedule:*/10 * * * * *}") public void recover(){for(var job:jobs.findByStateOrderByCreatedAtAsc("RUNNING",PageRequest.of(0,10000)))leases.recover(job.id);}
  @Scheduled(cron="${portal.jobs.schedule:*/1 * * * * *}") public void process() {
   var pending=jobs.findByStateOrderByCreatedAtAsc("QUEUED",PageRequest.of(0,1));if(pending.isEmpty())return;
-  var job=pending.getFirst();job.state="RUNNING";job.attempts++;job=jobs.saveAndFlush(job);Path directory=directory(job.id);Process process=null;
+  var claimed=leases.claim(pending.getFirst().id);if(claimed.isEmpty())return;var job=claimed.get();job.resultAttempt=job.leaseToken;Path source=directory(job.id),directory=source.resolve("attempts").resolve(job.resultAttempt);Process process=null;
   try {
-   Path output=directory.resolve("signed"+extension(job));Files.deleteIfExists(output);
+   Files.createDirectories(directory);Path output=directory.resolve("signed"+extension(job));
    Path worker=Path.of("../c2pa-worker/target/debug/c2pa-worker").toAbsolutePath().normalize();
-   process=new ProcessBuilder(worker.toString(),"sign",directory.resolve("original"+extension(job)).toString(),output.toString(),directory.resolve("manifest.json").toString(),job.certificatePath,job.keyPath).redirectOutput(directory.resolve("report.json").toFile()).redirectError(directory.resolve("worker-error.log").toFile()).start();
-   if(!process.waitFor(45,TimeUnit.SECONDS))throw new IllegalStateException("Processing timed out");
+   process=new ProcessBuilder(worker.toString(),"sign",source.resolve("original"+extension(job)).toString(),output.toString(),source.resolve("manifest.json").toString(),job.certificatePath,job.keyPath).redirectOutput(directory.resolve("report.json").toFile()).redirectError(directory.resolve("worker-error.log").toFile()).start();
+   if(!process.waitFor(job.workerTimeoutSeconds,TimeUnit.SECONDS))throw new IllegalStateException("Processing timed out");
    if(process.exitValue()!=0 || !Files.isRegularFile(output))throw new IllegalStateException("Content or certificate could not be signed");
    objects.write(job,"signed"+extension(job),output);objects.write(job,"report.json",directory.resolve("report.json"));
    job.state="COMPLETED";job.error=null;
@@ -73,12 +75,12 @@ public class JobService {
    if(job.completedAt==null || !job.completedAt.isBefore(cutoff))continue;
    job.state="DELETING";job=jobs.saveAndFlush(job);
    objects.delete(job);
-   Path folder=directory(job.id);if(Files.exists(folder)){try(var files=Files.list(folder)){for(Path file:files.toList())Files.deleteIfExists(file);}Files.delete(folder);}
-   jobs.deleteById(job.id);AuditEvent event=new AuditEvent();event.createdAt=Instant.now();event.actor="system";event.workspaceId=job.workspaceId;event.action="ASSET_RETENTION_DELETED";event.reference=job.id;audit.save(event);
+   Path folder=directory(job.id);if(Files.exists(folder)){try(var files=Files.walk(folder)){for(Path file:files.sorted(Comparator.reverseOrder()).toList())Files.deleteIfExists(file);}}
+   jobs.deleteById(job.id);audit.record(job.workspaceId,"system","ASSET_RETENTION_DELETED",job.id);
   }
  }
  public byte[] readAsset(SigningJob job,String name,long limit)throws Exception{
   if(objects.remote(job))return objects.read(job,name,limit);
-  Path file=directory(job.id).resolve(name);if(!Files.isRegularFile(file))throw new ResponseStatusException(HttpStatus.NOT_FOUND);if(Files.size(file)>limit)throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"Asset exceeds download limit");return Files.readAllBytes(file);
+  Path folder=directory(job.id);if(!name.startsWith("original") && job.resultAttempt!=null)folder=folder.resolve("attempts").resolve(job.resultAttempt);Path file=folder.resolve(name);if(!Files.isRegularFile(file))throw new ResponseStatusException(HttpStatus.NOT_FOUND);if(Files.size(file)>limit)throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"Asset exceeds download limit");return Files.readAllBytes(file);
  }
 }

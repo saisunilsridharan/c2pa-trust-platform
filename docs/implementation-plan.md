@@ -10,7 +10,7 @@ Users upload content, inspect existing provenance, select an approved signing pr
 
 React calls Java APIs. Java enforces authentication, workspace permissions, configuration, asset storage, and job state. Rust workers perform C2PA processing. Signing keys stay in KMS/HSM services. PostgreSQL stores users, memberships, asset versions, profiles, identities, configuration versions, jobs, verification reports, and audits. The implemented local/private mode stores originals and signed outputs in protected local directories; UI-configured private S3-compatible storage is implemented alongside local processing files.
 
-The implemented persistent queue invokes one bounded local Rust process at a time and recovers interrupted jobs. Add distributed leasing and isolated, resource-limited workers before running multiple instances. Preserve input hashes, profile versions, configuration versions, and job idempotency. Implemented jobs use QUEUED, RUNNING, COMPLETED, FAILED, and retention cleanup DELETING states.
+The implemented persistent queue invokes one bounded local Rust process per instance, uses database leases to coordinate claims, and recovers expired leases. Multiple instances require common storage and identity paths. Isolated, resource-limited distributed workers remain future work. Preserve input hashes, profile versions, configuration versions, and job idempotency. Implemented jobs use QUEUED, RUNNING, COMPLETED, FAILED, and retention cleanup DELETING states.
 
 ## Completed development signing slice
 
@@ -19,11 +19,11 @@ UI-created development identities, reviewed user declarations, image/audio/video
 ## Next: production signing vertical slice
 
 1. Named-user enrollment/login, organization roles, account disabling, password changes, and user-attributed audits are implemented. Administrator-assisted recovery with forced password change and session revocation/counts are implemented. Workspace-scoped profiles, identities, memberships, jobs, retention, audits and operations are implemented, with platform administrator recovery. Next add OIDC/SSO, MFA, self-service recovery, and stronger production login controls.
-2. Add Flyway migrations and PostgreSQL integration tests.
+2. Flyway migrations, legacy additive-upgrade checks and a real PostgreSQL 17.11 Java/Rust integration flow are implemented.
 3. UI private S3-compatible storage setup, test-before-activation, encrypted write-only credentials, version history/rollback and job snapshots are implemented. Test each deployment against its actual service.
 4. Add KMS/HSM providers and production certificate lifecycle. Development expiry status and UI rotation are implemented.
 5. Extend the implemented Rust signing and inspection with isolated queued workers, timestamping, and production trust policy.
-6. Persistent jobs and polling progress are implemented; persistent notifications, scoped personal API keys and HMAC webhook outbox/delivery/retry administration are implemented. Next add distributed workers.
+6. Persistent jobs and polling progress are implemented; persistent notifications, scoped personal API keys and HMAC webhook outbox/delivery/retry administration are implemented. Database worker leases, attempt isolation and UI processing limits are implemented; isolated distributed workers remain pending.
 7. JPEG, PNG, WebP, TIFF, WAV, MP3, FLAC, MP4, and PDF pass real signing, inspection, re-signing and tamper checks. Expand representative fixtures and independent-verifier compatibility testing.
 
 ## Administration expansion
@@ -45,3 +45,9 @@ End-to-end signing through the UI; unauthorized signing denied; workspace isolat
 ## Selected provider direction
 
 The user selected local/private services first. Prioritize private CA and local PKCS#12 signing (implemented), private object storage, local account recovery/session administration (implemented), private OIDC and PKCS#11/HSM adapters, then private trust/timestamp services. Do not label imported certificates publicly trusted without trust-list validation. Encrypted service credentials and UI master-key backup/recovery are implemented. Private S3-compatible storage connectivity tests and activation are implemented; private OIDC, hardware signing and trust/timestamp services remain pending.
+
+## Latest verified application status
+
+Completed: nine tested formats; workspace memberships and isolation; encrypted service credentials and key backup/restore; UI-configured private S3-compatible storage with tested versions and job snapshots; scoped personal API keys; persistent job notifications; signed webhook outbox, delivery retries and administration; Flyway migrations; database worker leases and attempt isolation; UI processing limits; audit hash chains and external-checkpoint export/comparison. The isolated H2 and PostgreSQL flows pass with the real Rust signer.
+
+Remaining application work: private OIDC/SSO and MFA; PKCS#11/HSM adapters and certificate lifecycle; private trust-anchor policy, trusted timestamps and public trust-list validation; self-service account recovery; isolated distributed workers; external immutable audit anchoring and wider independent-verifier compatibility. Private S3 has protocol regression coverage; each actual deployment still needs its own connectivity/compatibility test. Do not describe the complete production roadmap as finished.
