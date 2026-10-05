@@ -11,7 +11,9 @@ import java.util.HexFormat;
 @Component
 public class AdminAuthentication extends OncePerRequestFilter {
  private final byte[] token;
- public AdminAuthentication() throws IOException {
+ private final AccountService accounts;
+ public AdminAuthentication(AccountService accounts) throws IOException {
+  this.accounts=accounts;
   Path directory=Path.of(".local"); Files.createDirectories(directory);
   Path file=directory.resolve("admin-token");
   if (!Files.exists(file)) {
@@ -24,12 +26,24 @@ public class AdminAuthentication extends OncePerRequestFilter {
   token=value.getBytes(StandardCharsets.UTF_8);
  }
  @Override protected void doFilterInternal(HttpServletRequest request,HttpServletResponse response,FilterChain chain) throws ServletException,IOException {
-  if(request.getRequestURI().startsWith("/api/") && !request.getRequestURI().equals("/api/v1/health")) {
-   String supplied=request.getHeader("X-Admin-Token");
-   if(supplied==null || !MessageDigest.isEqual(token,supplied.getBytes(StandardCharsets.UTF_8))) {
-    response.setStatus(401); response.setContentType("application/json"); response.getWriter().write("{\"error\":\"Administrator authentication required\"}"); return;
-   }
-  }
+  String rawPath=request.getServletPath();if(rawPath.isEmpty())rawPath=request.getRequestURI();
+  String path=rawPath.replaceAll(";[^/]*", "").replaceAll("/+", "/");
+  if(!path.startsWith("/api/") || path.equals("/api/v1/health") || path.equals("/api/v1/auth/status") || path.equals("/api/v1/auth/login")){chain.doFilter(request,response);return;}
+  String supplied=request.getHeader("X-Admin-Token");
+  String authorization=request.getHeader("Authorization");
+  if(authorization!=null && authorization.startsWith("Bearer "))supplied=authorization.substring(7);
+  boolean bootstrap=!accounts.enrolled() && supplied!=null && MessageDigest.isEqual(token,supplied.getBytes(StandardCharsets.UTF_8));
+  var user=bootstrap?java.util.Optional.<PortalUser>empty():accounts.authenticate(supplied);
+  if(!bootstrap && user.isEmpty()){reject(response,401,"Authentication required");return;}
+  String role=bootstrap?"ADMIN":user.get().role;
+  boolean ordinary=java.util.Set.of("/api/v1/auth/me","/api/v1/auth/logout","/api/v1/auth/password","/api/v1/portal/configuration","/api/v1/verification").contains(path) || (path.equals("/api/v1/signing") && role.equals("SIGNER"));
+  if((!role.equals("ADMIN") && !ordinary) || (path.startsWith("/api/v1/admin/") && !role.equals("ADMIN")) || (path.equals("/api/v1/signing") && role.equals("VIEWER")) || (path.equals("/api/v1/auth/enroll") && !bootstrap)) {reject(response,403,"Permission denied");return;}
+  request.setAttribute("portal.actor",bootstrap?"bootstrap-administrator":user.get().username);
+  request.setAttribute("portal.role",role);request.setAttribute("portal.userId",bootstrap?null:user.get().id);
+  request.setAttribute("portal.sessionToken",supplied);
   chain.doFilter(request,response);
+ }
+ private void reject(HttpServletResponse response,int code,String message) throws IOException {
+  response.setStatus(code);response.setContentType("application/json");response.getWriter().write("{\"error\":\""+message+"\"}");
  }
 }

@@ -6,7 +6,10 @@ public class AuditService {
     public AuditService(AuditRepository repository){this.repository=repository;}
     public void record(String action,String reference){
         AuditEvent event=new AuditEvent();
-        event.createdAt=java.time.Instant.now();event.actor="local-administrator";
+        event.createdAt=java.time.Instant.now();
+        var attributes=org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        Object actor=attributes==null?null:attributes.getAttribute("portal.actor",org.springframework.web.context.request.RequestAttributes.SCOPE_REQUEST);
+        event.actor=actor==null?"system":actor.toString();
         event.action=action;event.reference=reference;repository.save(event);
     }
 }

@@ -35,6 +35,8 @@ public class ConfigurationController {
  private ConfigurationRecord current(Long revision) {
   ConfigurationRecord r=record();if(!Objects.equals(r.revision,revision))throw new ResponseStatusException(HttpStatus.CONFLICT,"Configuration changed; reload before saving");return r;
  }
+ @GetMapping("/portal/configuration") @Transactional
+ public State publicConfiguration(){ConfigurationRecord r=record();return new State(null,decode(r.active),r.revision,identity.available(),r.activeRevision);}
  @GetMapping("/health") public Map<String,String> health(){return Map.of("status","UP");}
  @GetMapping("/admin/configuration") @SecurityRequirement(name="adminToken") @Transactional
  public State get(){return state(record());}

@@ -4,7 +4,7 @@ React + TypeScript portal, Java 21 Spring Boot API with Swagger UI, and a Rust w
 
 ## Implemented development workflow
 
-- Administrator authentication with a random, local bootstrap token.
+- Initial administrator enrollment, named-account login, and administrator/signer/viewer permissions.
 - UI-managed organization name, signing profile, JPEG/PNG selection, upload limit, and AI disclosure requirement.
 - Persistent configuration drafts and active configuration, with optimistic revision checks.
 - Schema validation before profile activation; activation does **not** enable signing.
@@ -15,7 +15,7 @@ React + TypeScript portal, Java 21 Spring Boot API with Swagger UI, and a Rust w
 - Configuration history, revision-protected rollback, and paginated audit records.
 - Swagger UI documents the APIs and supports the administrator token through its Authorize button.
 
-Production signing identities and KMS/HSM, storage providers, production authentication, secret encryption, durable queueing, production certificate lifecycle, workspace roles, and tamper-evident audit storage are not implemented yet. Development signing uses a local private key created by the backend; no private-key entry or export is offered. See [the implementation roadmap](docs/implementation-plan.md).
+Production signing identities and KMS/HSM, storage providers, OIDC/SSO, workspace isolation, secret encryption, durable queueing, production certificate lifecycle, tamper-evident audit storage are not implemented yet. Development signing uses a local private key created by the backend; no private-key entry or export is offered. See [the implementation roadmap](docs/implementation-plan.md).
 
 ## Development
 
@@ -69,7 +69,7 @@ The administration panel shows certificate validity, expiry, and SHA-256 fingerp
 
 Activation and rollback create configuration snapshots. Restoring a version replaces active settings and the draft as a new revision; stale revisions are rejected. Existing active settings are imported as RECOVERED on first access. Versions overwritten before this release cannot be reconstructed.
 
-Audit records cover draft saves, activation, rollback, identity creation/rotation, successful signing, and completed inspection (including invalid integrity results). They exclude tokens, private keys, file contents, and creator declarations. They identify the shared local administrator; per-user attribution and tamper-evident storage are still pending. Rejected requests and process failures are not audited yet. History and audit views support pages of 50 records.
+Audit records cover draft saves, activation, rollback, identity creation/rotation, successful signing, and completed inspection (including invalid integrity results). They exclude tokens, private keys, file contents, and creator declarations. New records identify authenticated users. Historical records keep their original actor; tamper-evident storage remains pending. Rejected requests and process failures are not audited yet. History and audit views support pages of 50 records.
 
 ## Checks
 
@@ -81,3 +81,13 @@ npm run build
 ```
 
 Java tests cover access control, revisions, history, rollback, audits, real certificate generation/rotation, restart persistence, expiration, stable in-flight material, and OpenAPI metadata. Worker integration is additionally checked with representative manifest-bearing and malformed files. Run `python scripts/smoke-signing.py` against the running backend to exercise PNG signing, claims, re-signing/provenance preservation, and tampering detection. This smoke test creates a development identity if needed and activates the current draft only when no profile is active; PNG must be enabled. No universal format support or production trust is claimed.
+
+## Named accounts and permissions
+
+Before any users exist, connect using the local bootstrap token under Initial setup and enroll the first administrator in Users and permissions. Enrollment permanently disables the bootstrap token. Sign in with the new username and password thereafter. Administrators can create, disable, and assign ADMIN/SIGNER/VIEWER roles through the UI; the last enabled administrator cannot be disabled or demoted.
+
+ADMIN manages settings, users, identity rotation, history, and audits and may sign/verify. SIGNER signs and verifies using active settings. VIEWER reads active settings and verifies only. All users currently share one organization; multi-workspace isolation is pending. Roles and account status are checked on every API request.
+
+Passwords use BCrypt cost 12, require at least 12 characters, and accept at most 72 UTF-8 bytes. Five failed attempts lock a known account for 15 minutes. Session tokens expire after eight hours; only SHA-256 hashes are stored server-side. Tokens remain only in browser memory. Sign out revokes the current token; disabling users blocks their sessions immediately. UI password changes revoke all the account's sessions. OIDC/SSO, MFA, forgotten-password recovery, broader rate limiting, and session administration remain pending.
+
+For Swagger UI, call `/api/v1/auth/login` and authorize with its returned session token as `X-Admin-Token`; `Authorization: Bearer` is also accepted. The smoke script's bootstrap-token workflow works only before enrollment. After enrollment, use an authorized account session internally for checks without printing credentials. Production use requires TLS and additional hardening; retain private development access.

@@ -18,7 +18,7 @@ UI-created development identities, reviewed user declarations, JPEG/PNG signed d
 
 ## Next: production signing vertical slice
 
-1. Add protected UI enrollment and workspace roles; use Spring Security and OIDC.
+1. Named-user enrollment/login, organization roles, account disabling, password changes, and user-attributed audits are implemented. Next add workspaces, OIDC/SSO, MFA, recovery, and stronger production login controls.
 2. Add Flyway migrations and PostgreSQL integration tests.
 3. Implement UI storage setup with test-before-activation and encrypted write-only credentials.
 4. Add KMS/HSM providers and production certificate lifecycle. Development expiry status and UI rotation are implemented.

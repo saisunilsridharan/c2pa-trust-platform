@@ -7,9 +7,11 @@ type Props = {
     requireAiDisclosure: boolean;
   } | null;
   available: boolean;
+  canConfigure: boolean;
 };
 export default function SigningPanel({
   token,
+  canConfigure,
   active,
   available: initialAvailable,
 }: Props) {
@@ -42,6 +44,9 @@ export default function SigningPanel({
         This identity is not production trusted, expires after 30 days, and has
         no trusted timestamp. Your declarations will be embedded publicly.
       </div>
+      {!canConfigure && !available && (
+        <p>An administrator must configure the signing identity.</p>
+      )}
       {!available ? (
         <>
           <label className="check">
@@ -53,7 +58,7 @@ export default function SigningPanel({
             I understand this identity is for development only.
           </label>
           <button
-            disabled={busy || !ack}
+            disabled={busy || !ack || !canConfigure}
             onClick={() =>
               run(async () => {
                 const response = await fetch(
