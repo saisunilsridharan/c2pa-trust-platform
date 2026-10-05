@@ -6,5 +6,6 @@ public class ConfigurationRecord {
  @Version public Long revision;
  @Column(length=16000) public String draft;
  @Column(length=16000) public String active;
+ public Long activeRevision;
  public ConfigurationRecord() {}
 }

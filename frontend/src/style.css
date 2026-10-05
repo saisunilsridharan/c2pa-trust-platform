@@ -163,3 +163,11 @@ pre {
   border-radius: 8px;
   font-size: 12px;
 }
+
+select {
+  padding: 12px;
+  border: 1px solid #b7c9c6;
+  border-radius: 7px;
+  font: inherit;
+  background: white;
+}

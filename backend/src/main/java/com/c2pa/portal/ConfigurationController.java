@@ -17,18 +17,20 @@ public class ConfigurationController {
    @Min(1) @Max(100) int maxUploadMb, boolean requireAiDisclosure) {}
  public record Update(@NotNull @Valid Settings settings, @NotNull Long revision) {}
  public record State(Settings draft, Settings active, Long revision, boolean signingAvailable) {}
- private final ConfigurationRepository repository; private final ObjectMapper mapper;
- public ConfigurationController(ConfigurationRepository repository,ObjectMapper mapper) {this.repository=repository;this.mapper=mapper;}
+ private final ConfigurationRepository repository; private final ObjectMapper mapper; private final DevelopmentIdentity identity;
+ public ConfigurationController(ConfigurationRepository repository,ObjectMapper mapper,DevelopmentIdentity identity) {this.repository=repository;this.mapper=mapper;this.identity=identity;}
  private ConfigurationRecord record() {
-  return repository.findById(1L).orElseGet(()->{
+  ConfigurationRecord record=repository.findById(1L).orElseGet(()->{
    ConfigurationRecord r=new ConfigurationRecord();r.id=1L;
    r.draft=encode(new Settings("My organization","Creator attribution",Set.of("image/jpeg","image/png"),25,true));
    return repository.saveAndFlush(r);
   });
+  if(record.active!=null && record.activeRevision==null){record.activeRevision=record.revision;repository.saveAndFlush(record);}
+  return record;
  }
  private String encode(Settings s) {try{return mapper.writeValueAsString(s);}catch(Exception e){throw new IllegalStateException(e);}}
  private Settings decode(String s) {try{return s==null?null:mapper.readValue(s,Settings.class);}catch(Exception e){throw new IllegalStateException(e);}}
- private State state(ConfigurationRecord r){return new State(decode(r.draft),decode(r.active),r.revision,false);}
+ private State state(ConfigurationRecord r){return new State(decode(r.draft),decode(r.active),r.revision,identity.available());}
  private ConfigurationRecord current(Long revision) {
   ConfigurationRecord r=record();if(!Objects.equals(r.revision,revision))throw new ResponseStatusException(HttpStatus.CONFLICT,"Configuration changed; reload before saving");return r;
  }
@@ -38,7 +40,7 @@ public class ConfigurationController {
  @PutMapping("/admin/configuration/draft") @SecurityRequirement(name="adminToken") @Transactional
  public State save(@Valid @RequestBody Update update){ConfigurationRecord r=current(update.revision());r.draft=encode(update.settings());repository.saveAndFlush(r);return state(r);}
  @PostMapping("/admin/configuration/draft/test") @SecurityRequirement(name="adminToken")
- public Map<String,Object> test(@Valid @RequestBody Settings settings){return Map.of("valid",true,"signingAvailable",false,"message","Profile fields are valid. Signing requires a configured key provider and worker integration.");}
+ public Map<String,Object> test(@Valid @RequestBody Settings settings){return Map.of("valid",true,"signingAvailable",identity.available(),"message","Profile fields are valid. Development signing requires a development identity; production trust is unavailable.");}
  @PostMapping("/admin/configuration/draft/activate") @SecurityRequirement(name="adminToken") @Transactional
- public State activate(@RequestBody Map<String,Long> request){ConfigurationRecord r=current(request.get("revision"));r.active=r.draft;repository.saveAndFlush(r);return state(r);}
+ public State activate(@RequestBody Map<String,Long> request){ConfigurationRecord r=current(request.get("revision"));r.active=r.draft;r.activeRevision=r.revision+1;repository.saveAndFlush(r);return state(r);}
 }

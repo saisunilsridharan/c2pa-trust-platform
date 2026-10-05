@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
+import SigningPanel from "./SigningPanel";
 type Settings = {
   organizationName: string;
   profileName: string;
@@ -64,8 +65,8 @@ function App() {
         <nav>
           <strong>Organization settings</strong>
           <span>Signing profiles</span>
-          <span>Signing identities · upcoming</span>
-          <span>Content signing · upcoming</span>
+          <span>Development signing identity</span>
+          <span>Sign content</span>
         </nav>
         <a href="/swagger-ui/index.html" target="_blank" rel="noreferrer">
           API documentation ↗
@@ -80,8 +81,8 @@ function App() {
           </p>
         </header>
         <div className="notice">
-          Foundation release · Signing is unavailable until the key provider and
-          worker are connected. Never enter private keys here.
+          Development release · Create a development signing identity through
+          the UI. Production key providers are not connected.
         </div>
         {!state ? (
           <section>
@@ -233,7 +234,7 @@ function App() {
                         });
                         setState(s);
                         setMessage(
-                          "Profile activated. Signing remains unavailable.",
+                          "Profile activated. Configure a development identity to sign.",
                         );
                       })
                     }
@@ -242,6 +243,11 @@ function App() {
                   </button>
                 </div>
               </section>
+              <SigningPanel
+                token={token}
+                active={state.active}
+                available={state.signingAvailable}
+              />
               <section>
                 <h2>Inspect content credentials</h2>
                 <p>
