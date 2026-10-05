@@ -8,6 +8,7 @@ public class PortalUser {
  @Column(nullable=false) public String passwordHash;
  public String role;
  public boolean enabled=true;
+ @Column(nullable=false,columnDefinition="boolean default false") public boolean passwordChangeRequired;
  public int failedLogins;
  public Instant lockedUntil;
  public PortalUser(){}

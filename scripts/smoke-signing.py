@@ -19,7 +19,7 @@ def request(path, body=None):
         return json.load(response)
 
 
-def upload(path, content, fields=None):
+def upload(path, content, fields=None, headers=None):
     boundary = 'portal-' + uuid.uuid4().hex
     body = b''
     for name, value in (fields or {}).items():
@@ -27,7 +27,7 @@ def upload(path, content, fields=None):
     body += (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="sample.png"\r\nContent-Type: image/png\r\n\r\n').encode()
     body += content + f'\r\n--{boundary}--\r\n'.encode()
     req = urllib.request.Request(BASE + path, data=body, headers={
-        'X-Admin-Token': TOKEN, 'Content-Type': 'multipart/form-data; boundary=' + boundary})
+        'X-Admin-Token': TOKEN, 'Content-Type': 'multipart/form-data; boundary=' + boundary, **(headers or {})})
     with urllib.request.urlopen(req) as response:
         return response.read()
 

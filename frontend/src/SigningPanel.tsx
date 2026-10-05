@@ -8,10 +8,12 @@ type Props = {
   } | null;
   available: boolean;
   canConfigure: boolean;
+  onConfigured: () => Promise<void>;
 };
 export default function SigningPanel({
   token,
   canConfigure,
+  onConfigured,
   active,
   available: initialAvailable,
 }: Props) {
@@ -39,10 +41,10 @@ export default function SigningPanel({
   }
   return (
     <section>
-      <h2>Sign content · development</h2>
+      <h2>Sign content</h2>
       <div className="notice">
-        This identity is not production trusted, expires after 30 days, and has
-        no trusted timestamp. Your declarations will be embedded publicly.
+        Public trust has not been verified for the active identity. There is no
+        trusted timestamp. Your declarations will be embedded publicly.
       </div>
       {!canConfigure && !available && (
         <p>An administrator must configure the signing identity.</p>
@@ -78,6 +80,7 @@ export default function SigningPanel({
                   );
                 const identity = await response.json();
                 setAvailable(identity.available);
+                await onConfigured();
                 setMessage(
                   identity.available
                     ? "Development identity is ready. Its private key stays on the backend."
@@ -91,7 +94,7 @@ export default function SigningPanel({
         </>
       ) : (
         <p>
-          Development identity configured. Its private key stays on the backend.
+          Signing identity configured. Its private key stays on the backend.
         </p>
       )}
       {!active && <p>Activate a profile before signing.</p>}
@@ -156,7 +159,7 @@ export default function SigningPanel({
           checked={reviewed}
           onChange={(e) => setReviewed(e.target.checked)}
         />
-        I reviewed these public claims and authorize development signing.
+        I reviewed these public claims and authorize signing.
       </label>
       <button
         disabled={

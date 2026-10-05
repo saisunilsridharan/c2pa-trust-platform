@@ -16,7 +16,7 @@ public class ConfigurationController {
    @NotEmpty Set<@NotNull @Pattern(regexp="image/jpeg|image/png") String> formats,
    @Min(1) @Max(100) int maxUploadMb, boolean requireAiDisclosure) {}
  public record Update(@NotNull @Valid Settings settings, @NotNull Long revision) {}
- public record State(Settings draft, Settings active, Long revision, boolean signingAvailable, Long activeRevision) {}
+ public record State(Settings draft, Settings active, Long revision, boolean signingAvailable, Long activeRevision, String signingFingerprint) {}
  private final ConfigurationRepository repository; private final ObjectMapper mapper; private final DevelopmentIdentity identity; private final ConfigurationVersionRepository versions; private final AuditService audit;
  public ConfigurationController(ConfigurationRepository repository,ObjectMapper mapper,DevelopmentIdentity identity,ConfigurationVersionRepository versions,AuditService audit) {this.repository=repository;this.mapper=mapper;this.identity=identity;this.versions=versions;this.audit=audit;}
  private ConfigurationRecord record() {
@@ -31,12 +31,13 @@ public class ConfigurationController {
  }
  private String encode(Settings s) {try{return mapper.writeValueAsString(s);}catch(Exception e){throw new IllegalStateException(e);}}
  private Settings decode(String s) {try{return s==null?null:mapper.readValue(s,Settings.class);}catch(Exception e){throw new IllegalStateException(e);}}
- private State state(ConfigurationRecord r){return new State(decode(r.draft),decode(r.active),r.revision,identity.available(),r.activeRevision);}
+ private State state(ConfigurationRecord r){return new State(decode(r.draft),decode(r.active),r.revision,identity.available(),r.activeRevision,identity.status().fingerprint());}
  private ConfigurationRecord current(Long revision) {
   ConfigurationRecord r=record();if(!Objects.equals(r.revision,revision))throw new ResponseStatusException(HttpStatus.CONFLICT,"Configuration changed; reload before saving");return r;
  }
+ @SecurityRequirement(name="adminToken")
  @GetMapping("/portal/configuration") @Transactional
- public State publicConfiguration(){ConfigurationRecord r=record();return new State(null,decode(r.active),r.revision,identity.available(),r.activeRevision);}
+ public State publicConfiguration(){ConfigurationRecord r=record();return new State(null,decode(r.active),r.revision,identity.available(),r.activeRevision,identity.status().fingerprint());}
  @GetMapping("/health") public Map<String,String> health(){return Map.of("status","UP");}
  @GetMapping("/admin/configuration") @SecurityRequirement(name="adminToken") @Transactional
  public State get(){return state(record());}

@@ -14,10 +14,10 @@ public class AccountService {
  private final BCryptPasswordEncoder encoder=new BCryptPasswordEncoder(12);
  private final String dummy=encoder.encode("unused-account-password");
  public AccountService(UserRepository users,SessionRepository sessions){this.users=users;this.sessions=sessions;}
- public record Profile(Long id,String username,String role,boolean enabled){}
+ public record Profile(Long id,String username,String role,boolean enabled,boolean passwordChangeRequired){}
  public record Login(String token,Instant expiresAt,Profile user){}
  public static String hash(String token){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8)));}catch(Exception e){throw new IllegalStateException(e);}}
- public Profile profile(PortalUser user){return new Profile(user.id,user.username,user.role,user.enabled);}
+ public Profile profile(PortalUser user){return new Profile(user.id,user.username,user.role,user.enabled,user.passwordChangeRequired);}
  public boolean enrolled(){return users.count()>0;}
  public Optional<PortalUser> authenticate(String token){
   if(token==null || !token.matches("[a-f0-9]{64}"))return Optional.empty();
@@ -48,9 +48,15 @@ public class AccountService {
  @Transactional
  public boolean changePassword(Long userId,String currentPassword,String newPassword){
   validatePassword(newPassword);
-  var user=users.findById(userId).orElseThrow();
+  var user=users.lockById(userId).orElseThrow();
   if(currentPassword==null || currentPassword.getBytes(StandardCharsets.UTF_8).length>72 || !encoder.matches(currentPassword,user.passwordHash))return false;
-  user.passwordHash=encoder.encode(newPassword);users.save(user);sessions.deleteAllByUserId(userId);return true;
+  if(encoder.matches(newPassword,user.passwordHash))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Choose a different password");
+  user.passwordHash=encoder.encode(newPassword);user.passwordChangeRequired=false;users.save(user);sessions.deleteAllByUserId(userId);return true;
+ }
+ @Transactional public void resetPassword(Long userId,String password){
+  validatePassword(password);var user=users.lockById(userId).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"User not found"));
+  if(encoder.matches(password,user.passwordHash))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Choose a different password");
+  user.passwordHash=encoder.encode(password);user.passwordChangeRequired=true;user.failedLogins=0;user.lockedUntil=null;users.save(user);sessions.deleteAllByUserId(userId);
  }
  static void validatePassword(String password){
   if(password==null || password.length()<12 || password.getBytes(StandardCharsets.UTF_8).length>72)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Password requires at least 12 characters and at most 72 UTF-8 bytes");

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 type Identity = {
   configured: boolean;
+  provider: string;
   available: boolean;
   state: string;
   fingerprint: string | null;
@@ -33,6 +34,9 @@ export default function AdministrationPanel({
     [auditPage, setAuditPage] = useState(0),
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
+  const [bundle, setBundle] = useState<File | null>(null),
+    [bundlePassword, setBundlePassword] = useState(""),
+    [importConfirmed, setImportConfirmed] = useState(false);
   const [rotateConfirmed, setRotateConfirmed] = useState(false),
     [selected, setSelected] = useState<number | null>(null),
     [rollbackConfirmed, setRollbackConfirmed] = useState(false);
@@ -117,11 +121,12 @@ export default function AdministrationPanel({
           Refresh
         </button>
       </div>
-      <h3>Development certificate</h3>
+      <h3>Signing certificate</h3>
       {identity ? (
         <>
           <p>
-            Status: <strong>{identity.state}</strong> · production trusted: no
+            Status: <strong>{identity.state}</strong> · provider:{" "}
+            {identity.provider} · public trust not verified
             <br />
             Expiry:{" "}
             {identity.expiresAt
@@ -141,8 +146,9 @@ export default function AdministrationPanel({
                   checked={rotateConfirmed}
                   onChange={(e) => setRotateConfirmed(e.target.checked)}
                 />
-                Rotate for future signatures. Existing signed files and
-                in-progress requests keep their original identity.
+                Replace with a development identity for future signatures.
+                Existing signed files and in-progress requests keep their
+                original identity.
               </label>
               <button
                 disabled={busy || !rotateConfirmed}
@@ -169,6 +175,83 @@ export default function AdministrationPanel({
       ) : (
         <p>Loading status…</p>
       )}
+      <h3>Import a private CA identity</h3>
+      <p>
+        Upload a password-protected PKCS#12 bundle containing one EC P-256
+        signing key and its C2PA-compatible certificate chain. A signing test
+        must pass before activation. The key is stored in an owner-only local
+        file; this provider has no HSM protection or trusted timestamp. Use a
+        private connection or HTTPS.
+      </p>
+      <label>
+        PKCS#12 bundle (up to 1 MiB)
+        <input
+          type="file"
+          accept=".p12,.pfx"
+          onChange={(e) => {
+            setBundle(e.target.files?.[0] ?? null);
+            setImportConfirmed(false);
+          }}
+        />
+      </label>
+      <label>
+        Bundle password
+        <input
+          type="password"
+          autoComplete="off"
+          value={bundlePassword}
+          onChange={(e) => setBundlePassword(e.target.value)}
+        />
+      </label>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={importConfirmed}
+          onChange={(e) => setImportConfirmed(e.target.checked)}
+        />
+        I authorize local key storage and replacing the active signing identity.
+        Public trust is not automatically established.
+      </label>
+      <button
+        disabled={
+          busy || !bundle || !bundlePassword || !identity || !importConfirmed
+        }
+        onClick={() =>
+          run(async () => {
+            if (!bundle || !identity) return;
+            const form = new FormData();
+            form.append("bundle", bundle);
+            form.append("password", bundlePassword);
+            form.append("acknowledgeLocalKeyStorage", "true");
+            if (identity.fingerprint)
+              form.append("expectedFingerprint", identity.fingerprint);
+            try {
+              const response = await fetch(
+                "/api/v1/admin/signing-identity/private",
+                {
+                  method: "POST",
+                  headers: { "X-Admin-Token": token },
+                  body: form,
+                },
+              );
+              if (!response.ok)
+                throw new Error(
+                  `Import failed (${response.status}). Check bundle, password, chain and worker readiness; refresh if the identity changed.`,
+                );
+              setImportConfirmed(false);
+              await onChange();
+              await load();
+              setMessage(
+                "Private identity imported after a successful C2PA signing test.",
+              );
+            } finally {
+              setBundlePassword("");
+            }
+          })
+        }
+      >
+        Test and import private identity
+      </button>
       <h3>Configuration history</h3>
       <p>
         Restore replaces both active settings and the draft. Only versions

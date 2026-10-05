@@ -1,0 +1,397 @@
+import { useEffect, useState } from "react";
+type Job = {
+  id: string;
+  state: string;
+  title: string;
+  format: string;
+  owner: string;
+  attempts: number;
+  error: string | null;
+  createdAt: string;
+};
+export default function JobsPanel({
+  token,
+  canSign,
+  admin,
+  activeProfile,
+  profileRevision,
+  signingFingerprint,
+}: {
+  token: string;
+  canSign: boolean;
+  admin: boolean;
+  activeProfile: { organizationName: string; profileName: string } | null;
+  profileRevision: number | null;
+  signingFingerprint: string | null;
+}) {
+  const [operations, setOperations] = useState<Record<string, unknown> | null>(
+    null,
+  );
+  const [jobs, setJobs] = useState<Job[]>([]),
+    [page, setPage] = useState(0),
+    [message, setMessage] = useState(""),
+    [busy, setBusy] = useState(false);
+  const [files, setFiles] = useState<File[]>([]),
+    [creator, setCreator] = useState(""),
+    [title, setTitle] = useState(""),
+    [ai, setAi] = useState("none"),
+    [reviewed, setReviewed] = useState(false);
+  const [retention, setRetention] = useState<{
+      revision: number;
+      retentionDays: number;
+      provider: string;
+    } | null>(null),
+    [ack, setAck] = useState(false);
+  async function request(path: string, method = "GET", body?: unknown) {
+    const response = await fetch("/api/v1/" + path, {
+      method,
+      headers: {
+        "X-Admin-Token": token,
+        ...(body instanceof FormData
+          ? {}
+          : { "Content-Type": "application/json" }),
+      },
+      body:
+        body === undefined
+          ? undefined
+          : body instanceof FormData
+            ? body
+            : JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(`Request failed (${response.status}).`);
+    return response.json();
+  }
+  async function load() {
+    setJobs(await request(`jobs?page=${page}`));
+    if (admin) setOperations(await request("admin/operations"));
+  }
+  useEffect(
+    () => setReviewed(false),
+    [activeProfile, profileRevision, signingFingerprint],
+  );
+  useEffect(() => {
+    let active = true;
+    const refresh = () =>
+      request(`jobs?page=${page}`)
+        .then((j) => {
+          if (active) setJobs(j);
+        })
+        .catch((e) => {
+          if (active) setMessage(e.message);
+        });
+    refresh();
+    const timer = setInterval(refresh, 3000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [token, page]);
+  useEffect(() => {
+    if (admin)
+      request("admin/operations")
+        .then(setOperations)
+        .catch((e) => setMessage(e.message));
+    if (admin)
+      request("admin/storage")
+        .then(setRetention)
+        .catch((e) => setMessage(e.message));
+  }, [admin, token]);
+  async function run(action: () => Promise<void>) {
+    setBusy(true);
+    setMessage("");
+    try {
+      await action();
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Request failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section>
+      <h2>Saved assets & signing jobs</h2>
+      {admin && operations && (
+        <p>
+          Queue: {String(operations.queued)} waiting ·{" "}
+          {String(operations.running)} running · {String(operations.completed)}{" "}
+          completed · {String(operations.failed)} failed. Database:{" "}
+          {String(operations.database)}. Worker installed:{" "}
+          {String(operations.workerBinaryInstalled)}.
+        </p>
+      )}
+      <p>
+        Originals and signed outputs are saved separately. Jobs keep their
+        reviewed claims and identity across configuration changes. This queue
+        runs on one application instance.
+      </p>
+      {canSign && (
+        <>
+          <label>
+            Batch files
+            <input
+              type="file"
+              multiple
+              accept="image/jpeg,image/png"
+              onChange={(e) => {
+                setFiles(Array.from(e.target.files ?? []));
+                setReviewed(false);
+              }}
+            />
+          </label>
+          <label>
+            Creator
+            <input
+              value={creator}
+              maxLength={120}
+              onChange={(e) => {
+                setCreator(e.target.value);
+                setReviewed(false);
+              }}
+            />
+          </label>
+          <label>
+            Title for this batch
+            <input
+              value={title}
+              maxLength={200}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                setReviewed(false);
+              }}
+            />
+          </label>
+          <label>
+            AI disclosure
+            <select
+              value={ai}
+              onChange={(e) => {
+                setAi(e.target.value);
+                setReviewed(false);
+              }}
+            >
+              <option value="none">No AI use declared</option>
+              <option value="generated">AI generated</option>
+              <option value="edited">AI edited</option>
+            </select>
+          </label>
+          <p>
+            Public user declarations: creator {creator || "required"}, title{" "}
+            {title || "required"}, AI disclosure {ai}. Organization:{" "}
+            {activeProfile?.organizationName || "not configured"}; profile:{" "}
+            {activeProfile?.profileName || "not configured"}. Profile revision:{" "}
+            {profileRevision}. Signing certificate SHA-256:{" "}
+            <code>{signingFingerprint || "not configured"}</code>.
+          </p>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={reviewed}
+              onChange={(e) => setReviewed(e.target.checked)}
+            />
+            I reviewed the public declarations and authorize signing for the
+            selected files.
+          </label>
+          <button
+            disabled={
+              busy ||
+              !activeProfile ||
+              !signingFingerprint ||
+              !files.length ||
+              !creator.trim() ||
+              !title.trim() ||
+              !reviewed
+            }
+            onClick={() =>
+              run(async () => {
+                let submitted = 0;
+                for (const file of files) {
+                  const body = new FormData();
+                  body.append("file", file);
+                  body.append("creator", creator);
+                  body.append("title", title);
+                  body.append("aiDisclosure", ai);
+                  body.append("acknowledgePublicClaims", "true");
+                  body.append(
+                    "expectedProfileRevision",
+                    String(profileRevision),
+                  );
+                  body.append(
+                    "expectedIdentityFingerprint",
+                    signingFingerprint!,
+                  );
+                  const response = await fetch("/api/v1/jobs", {
+                    method: "POST",
+                    headers: {
+                      "X-Admin-Token": token,
+                      "Idempotency-Key": crypto.randomUUID(),
+                    },
+                    body,
+                  });
+                  if (!response.ok) {
+                    await load();
+                    throw new Error(
+                      `${submitted} files queued; ${file.name} failed (${response.status}). Remaining files were not queued.`,
+                    );
+                  }
+                  submitted++;
+                }
+                await load();
+                setFiles([]);
+                setReviewed(false);
+                setMessage(`${submitted} files queued.`);
+              })
+            }
+          >
+            Queue signing batch
+          </button>
+        </>
+      )}
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Title / owner</th>
+              <th>Status</th>
+              <th>Downloads</th>
+            </tr>
+          </thead>
+          <tbody>
+            {jobs.map((job) => (
+              <tr key={job.id}>
+                <td>
+                  {job.title}
+                  <br />
+                  {job.owner}
+                </td>
+                <td>
+                  {job.state} · attempt {job.attempts}
+                  {job.error && <p>{job.error}</p>}
+                  {job.state === "FAILED" && canSign && (
+                    <button
+                      disabled={busy}
+                      onClick={() =>
+                        run(async () => {
+                          await request(`jobs/${job.id}/retry`, "POST");
+                          await load();
+                        })
+                      }
+                    >
+                      Retry
+                    </button>
+                  )}
+                </td>
+                <td>
+                  {["original", "signed", "report"].map((version) => (
+                    <button
+                      key={version}
+                      className="secondary"
+                      disabled={
+                        busy ||
+                        (version !== "original" && job.state !== "COMPLETED")
+                      }
+                      onClick={() =>
+                        run(async () => {
+                          const response = await fetch(
+                            version === "report"
+                              ? `/api/v1/jobs/${job.id}/report`
+                              : `/api/v1/jobs/${job.id}/download?version=${version}`,
+                            { headers: { "X-Admin-Token": token } },
+                          );
+                          if (!response.ok)
+                            throw new Error(
+                              `Download failed (${response.status}).`,
+                            );
+                          const url = URL.createObjectURL(
+                            await response.blob(),
+                          );
+                          const link = document.createElement("a");
+                          link.href = url;
+                          link.download =
+                            version +
+                            (version === "report"
+                              ? ".json"
+                              : job.format === "image/png"
+                                ? ".png"
+                                : ".jpg");
+                          link.click();
+                          setTimeout(() => URL.revokeObjectURL(url), 1000);
+                        })
+                      }
+                    >
+                      {version}
+                    </button>
+                  ))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="actions">
+        <button disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
+          Previous
+        </button>
+        <button
+          disabled={jobs.length < 50}
+          onClick={() => setPage((p) => p + 1)}
+        >
+          Next
+        </button>
+      </div>
+      {admin && retention && (
+        <>
+          <h3>Storage retention</h3>
+          <p>
+            {retention.provider}. Completed/failed job assets are deleted
+            automatically after the configured retention period; queued/running
+            jobs are retained.
+          </p>
+          <label>
+            Retention days
+            <input
+              type="number"
+              min={1}
+              max={3650}
+              value={retention.retentionDays}
+              onChange={(e) => {
+                setRetention({
+                  ...retention,
+                  retentionDays: Number(e.target.value),
+                });
+                setAck(false);
+              }}
+            />
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={ack}
+              onChange={(e) => setAck(e.target.checked)}
+            />
+            I acknowledge permanent deletion of expired original and signed
+            assets.
+          </label>
+          <button
+            disabled={busy || !ack}
+            onClick={() =>
+              run(async () => {
+                setRetention(
+                  await request("admin/storage", "PUT", {
+                    revision: retention.revision,
+                    retentionDays: retention.retentionDays,
+                    acknowledgeDeletion: true,
+                  }),
+                );
+                setAck(false);
+                setMessage("Retention settings saved.");
+              })
+            }
+          >
+            Save retention
+          </button>
+        </>
+      )}
+      <p role="status">{busy ? "Working…" : message}</p>
+    </section>
+  );
+}

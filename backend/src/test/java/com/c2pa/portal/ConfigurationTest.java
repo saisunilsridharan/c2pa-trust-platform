@@ -15,6 +15,7 @@ class ConfigurationTest {
  @org.springframework.test.context.bean.override.mockito.MockitoBean DevelopmentIdentity identity;
  @Autowired MockMvc mvc; @Autowired ObjectMapper mapper;
  @Test void configurationLifecycleAndAccessControl() throws Exception {
+  org.mockito.Mockito.when(identity.status()).thenReturn(new DevelopmentIdentity.Status(false,false,"NOT_CONFIGURED","development",false,null,null));
   mvc.perform(get("/api/v1/admin/configuration")).andExpect(status().isUnauthorized());
   String token=Files.readString(Path.of(".local/admin-token")).trim();
   var initial=mvc.perform(get("/api/v1/admin/configuration").header("X-Admin-Token",token)).andExpect(status().isOk()).andReturn();

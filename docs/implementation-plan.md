@@ -8,22 +8,22 @@ Users upload content, inspect existing provenance, select an approved signing pr
 
 ## Architecture
 
-React calls Java APIs. Java enforces authentication, workspace permissions, configuration, asset storage, and job state. Rust workers perform C2PA processing. Signing keys stay in KMS/HSM services. PostgreSQL stores users, memberships, asset versions, profiles, identities, configuration versions, jobs, verification reports, and audits. Private object storage holds originals and signed outputs.
+React calls Java APIs. Java enforces authentication, workspace permissions, configuration, asset storage, and job state. Rust workers perform C2PA processing. Signing keys stay in KMS/HSM services. PostgreSQL stores users, memberships, asset versions, profiles, identities, configuration versions, jobs, verification reports, and audits. The implemented local/private mode stores originals and signed outputs in protected local directories; external object storage remains pending.
 
-The current worker invocation is a bounded local process for development inspection. Replace it with isolated, resource-limited workers and a durable queue before production. Preserve input hashes, profile versions, configuration versions, and job idempotency. Jobs use QUEUED, INSPECTING, SIGNING, VALIDATING, COMPLETED, and FAILED states.
+The implemented persistent queue invokes one bounded local Rust process at a time and recovers interrupted jobs. Add distributed leasing and isolated, resource-limited workers before running multiple instances. Preserve input hashes, profile versions, configuration versions, and job idempotency. Implemented jobs use QUEUED, RUNNING, COMPLETED, FAILED, and retention cleanup DELETING states.
 
 ## Completed development signing slice
 
-UI-created development identities, reviewed user declarations, JPEG/PNG signed downloads, post-sign validation, original ingredient retention, and tampering checks are implemented. Configuration history/rollback, audit records, and development certificate status/rotation are implemented. Local files and synchronous workers are development-only; public certificate trust and production key providers remain outstanding.
+UI-created development identities, reviewed user declarations, JPEG/PNG signed downloads, post-sign validation, original ingredient retention, and tampering checks are implemented. Configuration history/rollback, audit records, and development certificate status/rotation are implemented. Batch jobs, original/signed assets, downloadable validation reports, per-user job access, manual retries, startup recovery, UI retention, and operations diagnostics are implemented for a single local instance. UI PKCS#12 private identity import includes chain/key checks and a real Rust signing probe. Public certificate trust, trusted timestamps, encrypted storage, and hardware key providers remain outstanding.
 
 ## Next: production signing vertical slice
 
-1. Named-user enrollment/login, organization roles, account disabling, password changes, and user-attributed audits are implemented. Next add workspaces, OIDC/SSO, MFA, recovery, and stronger production login controls.
+1. Named-user enrollment/login, organization roles, account disabling, password changes, and user-attributed audits are implemented. Administrator-assisted recovery with forced password change and session revocation/counts are implemented. Next add workspaces, OIDC/SSO, MFA, self-service recovery, and stronger production login controls.
 2. Add Flyway migrations and PostgreSQL integration tests.
 3. Implement UI storage setup with test-before-activation and encrypted write-only credentials.
 4. Add KMS/HSM providers and production certificate lifecycle. Development expiry status and UI rotation are implemented.
 5. Extend the implemented Rust signing and inspection with isolated queued workers, timestamping, and production trust policy.
-6. Extend the implemented upload, signing review, signed download, and verification UI with durable jobs and progress.
+6. Persistent jobs and polling progress are implemented; next add distributed workers, notifications, and webhook integrations.
 7. Validate JPEG and PNG signing, tampering detection, provenance preservation, and independent-verifier compatibility.
 
 ## Administration expansion
@@ -41,3 +41,7 @@ Publish a capability registry derived from the installed SDK version and tested 
 ## Production acceptance
 
 End-to-end signing through the UI; unauthorized signing denied; workspace isolation; modified-content detection; invalid, expired, and untrusted certificate handling; timestamp checks; restart persistence; idempotent retries and worker recovery; key protection; malformed-file resource limits; certificate rotation; audits; rollback; independent verifier compatibility.
+
+## Selected provider direction
+
+The user selected local/private services first. Prioritize private CA and local PKCS#12 signing (implemented), private object storage, local account recovery/session administration (implemented), private OIDC and PKCS#11/HSM adapters, then private trust/timestamp services. Do not label imported certificates publicly trusted without trust-list validation. Connectivity tests and secret-at-rest protection remain prerequisites for external/private service credentials.

@@ -6,6 +6,21 @@ import java.time.*;
 import static org.junit.jupiter.api.Assertions.*;
 class DevelopmentIdentityTest {
  @TempDir Path directory;
+ @Test void privateBundleRunsRealSigningProbeAndSurvivesRestart()throws Exception {
+  org.junit.jupiter.api.Assumptions.assumeTrue(Files.isExecutable(Path.of("../c2pa-worker/target/debug/c2pa-worker")),"Build the Rust worker before this integration check");
+  DevelopmentIdentity identity=new DevelopmentIdentity(directory);identity.create();var material=identity.material();
+  String pem=Files.readString(material.key()).replace("-----BEGIN PRIVATE KEY-----","").replace("-----END PRIVATE KEY-----","").replaceAll("\\s","");
+  var key=java.security.KeyFactory.getInstance("EC").generatePrivate(new java.security.spec.PKCS8EncodedKeySpec(java.util.Base64.getDecoder().decode(pem)));
+  java.security.cert.Certificate[] chain;try(var in=Files.newInputStream(material.certificate())){chain=java.security.cert.CertificateFactory.getInstance("X.509").generateCertificates(in).toArray(java.security.cert.Certificate[]::new);}
+  char[] password="test-private-bundle".toCharArray();var store=java.security.KeyStore.getInstance("PKCS12");store.load(null,password);store.setKeyEntry("signer",key,password,chain);var output=new java.io.ByteArrayOutputStream();store.store(output,password);
+  var status=identity.importPrivate(output.toByteArray(),password,identity.status().fingerprint());assertTrue(status.available());assertEquals("private-certificate",status.provider());assertFalse(status.productionTrusted());assertFalse(identity.material().development());
+  assertTrue(Files.exists(material.key()));assertEquals("private-certificate",new DevelopmentIdentity(directory).status().provider());
+ }
+ @Test void invalidPrivateImportPreservesCurrentIdentityAndClearsSecrets()throws Exception {
+  DevelopmentIdentity identity=new DevelopmentIdentity(directory);identity.create();var current=identity.status();byte[] invalid={1,2,3};char[] password="secret-password".toCharArray();
+  assertThrows(org.springframework.web.server.ResponseStatusException.class,()->identity.importPrivate(invalid,password,current.fingerprint()));
+  assertEquals(current.fingerprint(),identity.status().fingerprint());assertArrayEquals(new byte[3],invalid);assertArrayEquals(new char[15],password);
+ }
  @Test void rotationPreservesInFlightMaterialAndRejectsStaleChanges() throws Exception {
   DevelopmentIdentity identity=new DevelopmentIdentity(directory);
   assertFalse(identity.status().configured());identity.create();

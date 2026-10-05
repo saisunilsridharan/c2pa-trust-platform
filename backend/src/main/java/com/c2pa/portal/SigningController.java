@@ -29,12 +29,18 @@ public class SigningController {
   if(!request.acknowledgeUntrusted())throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Acknowledge development-only rotation");
   var result=identity.rotate(request.expectedFingerprint());audit.record("DEVELOPMENT_IDENTITY_ROTATED",result.fingerprint());return result;
  }
+ @PostMapping(value="/admin/signing-identity/private",consumes="multipart/form-data")
+ public DevelopmentIdentity.Status importPrivate(@RequestPart("bundle") MultipartFile bundle,@RequestParam String password,@RequestParam(required=false) String expectedFingerprint,@RequestParam boolean acknowledgeLocalKeyStorage)throws Exception {
+  if(!acknowledgeLocalKeyStorage)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Acknowledge local private-key storage");
+  if(bundle.getSize()>1024*1024)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Bundle exceeds 1 MiB");
+  var result=identity.importPrivate(bundle.getBytes(),password.toCharArray(),expectedFingerprint);audit.record("PRIVATE_IDENTITY_IMPORTED",result.fingerprint());return result;
+ }
  @PostMapping(value="/signing",consumes="multipart/form-data")
  public ResponseEntity<byte[]> sign(@RequestPart("file") MultipartFile file,@RequestParam String creator,@RequestParam String title,@RequestParam(required=false,defaultValue="unspecified") String aiDisclosure,@RequestParam boolean acknowledgePublicClaims) throws Exception {
   if(!acknowledgePublicClaims)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Review public claims before signing");
   if(creator.isBlank() || creator.length()>120 || title.isBlank() || title.length()>200)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Creator and title are required and must fit field limits");
   if(!Set.of("none","generated","edited","unspecified").contains(aiDisclosure))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid AI disclosure");
-  if(!identity.available())throw new ResponseStatusException(HttpStatus.CONFLICT,"Configure a development identity first");
+  if(!identity.available())throw new ResponseStatusException(HttpStatus.CONFLICT,"Configure a signing identity first");
   var record=repository.findById(1L).filter(r->r.active!=null).orElseThrow(()->new ResponseStatusException(HttpStatus.CONFLICT,"Activate a profile first"));
   var settings=mapper.readValue(record.active,ConfigurationController.Settings.class);
   if(settings.requireAiDisclosure() && aiDisclosure.equals("unspecified"))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"AI disclosure is required by the active profile");
@@ -49,14 +55,14 @@ public class SigningController {
   try {
    String extension=format.equals("image/png")?".png":".jpg";
    Path input=directory.resolve("original"+extension),output=directory.resolve("signed"+extension),manifest=directory.resolve("manifest.json");file.transferTo(input);
-   var declarations=Map.of("creator",creator,"organization",settings.organizationName(),"profile",settings.profileName(),"configurationRevision",record.activeRevision==null?record.revision:record.activeRevision,"aiDisclosure",aiDisclosure,"source","user-declared","developmentIdentity",true);
+   var declarations=Map.of("creator",creator,"organization",settings.organizationName(),"profile",settings.profileName(),"configurationRevision",record.activeRevision==null?record.revision:record.activeRevision,"aiDisclosure",aiDisclosure,"source","user-declared","developmentIdentity",material.development());
    var definition=Map.of("claim_generator_info",List.of(Map.of("name","C2PA Trust Portal","version","0.2.0")),"title",title,"format",format,"assertions",List.of(Map.of("label","com.c2pa.portal.declarations","data",declarations)));
    Files.writeString(manifest,mapper.writeValueAsString(definition));
    process=new ProcessBuilder(worker.toString(),"sign",input.toString(),output.toString(),manifest.toString(),material.certificate().toString(),material.key().toString()).redirectOutput(directory.resolve("report.json").toFile()).redirectError(directory.resolve("error.log").toFile()).start();
    if(!process.waitFor(45,TimeUnit.SECONDS))throw new ResponseStatusException(HttpStatus.GATEWAY_TIMEOUT,"Signing timed out");
-   if(process.exitValue()!=0 || !Files.exists(output))throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"Signing failed: unsupported content, invalid provenance, or expired development certificate");
+   if(process.exitValue()!=0 || !Files.exists(output))throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"Signing failed: unsupported content, invalid provenance, or invalid signing certificate");
    audit.record("CONTENT_SIGNED",material.fingerprint()+"/configuration-"+(record.activeRevision==null?record.revision:record.activeRevision));
-   return ResponseEntity.ok().contentType(MediaType.parseMediaType(format)).header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename=\"signed-content"+extension+"\"").header("X-Signing-Identity","development-untrusted").body(Files.readAllBytes(output));
+   return ResponseEntity.ok().contentType(MediaType.parseMediaType(format)).header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename=\"signed-content"+extension+"\"").header("X-Signing-Identity",material.development()?"development-untrusted":"private-certificate-trust-unverified").body(Files.readAllBytes(output));
   } finally {
    if(process!=null && process.isAlive()){process.destroyForcibly();process.waitFor(5,TimeUnit.SECONDS);}
    try(var paths=Files.list(directory)){for(Path path:paths.toList())Files.deleteIfExists(path);}Files.deleteIfExists(directory);

@@ -5,6 +5,7 @@ import SigningPanel from "./SigningPanel";
 import AdministrationPanel from "./AdministrationPanel";
 import UsersPanel from "./UsersPanel";
 import PasswordPanel from "./PasswordPanel";
+import JobsPanel from "./JobsPanel";
 type Settings = {
   organizationName: string;
   profileName: string;
@@ -17,12 +18,15 @@ type State = {
   active: Settings | null;
   revision: number;
   signingAvailable: boolean;
+  activeRevision: number | null;
+  signingFingerprint: string | null;
 };
 function App() {
   const [user, setUser] = useState<{
     id: number | null;
     username: string;
     role: string;
+    passwordChangeRequired: boolean;
   } | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -41,6 +45,14 @@ function App() {
     });
     if (!response.ok) throw new Error("Authentication failed.");
     const account = await response.json();
+    if (account.passwordChangeRequired) {
+      setToken(sessionToken);
+      setUser(account);
+      setState(null);
+      setSettings(null);
+      setPassword("");
+      return;
+    }
     const config = await fetch(
       account.role === "ADMIN"
         ? "/api/v1/admin/configuration"
@@ -131,10 +143,32 @@ function App() {
           </p>
         </header>
         <div className="notice">
-          Development release · Create a development signing identity through
-          the UI. Production key providers are not connected.
+          Local/private release · Configure a development identity or import a
+          private CA certificate through the UI. Public trust and hardware key
+          providers are not connected.
         </div>
-        {!state ? (
+        {user?.passwordChangeRequired ? (
+          <>
+            <div className="notice">
+              Your administrator reset your password. Choose a new password
+              before using the portal.
+            </div>
+            <PasswordPanel token={token} onChanged={disconnect} />
+            <button
+              onClick={() =>
+                run(async () => {
+                  await fetch("/api/v1/auth/logout", {
+                    method: "POST",
+                    headers: { "X-Admin-Token": token },
+                  });
+                  disconnect();
+                })
+              }
+            >
+              Sign out
+            </button>
+          </>
+        ) : !state ? (
           <section>
             <h2>Sign in</h2>
             <label>
@@ -370,8 +404,17 @@ function App() {
                   active={state.active}
                   canConfigure={user?.role === "ADMIN"}
                   available={state.signingAvailable}
+                  onConfigured={async () => setState(await request(""))}
                 />
               )}
+              <JobsPanel
+                token={token}
+                canSign={user?.role !== "VIEWER"}
+                admin={user?.role === "ADMIN"}
+                activeProfile={state.active}
+                profileRevision={state.activeRevision}
+                signingFingerprint={state.signingFingerprint}
+              />
               <section>
                 <h2>Inspect content credentials</h2>
                 <p>
