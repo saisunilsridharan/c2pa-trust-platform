@@ -24,12 +24,12 @@ public class JobsController {
  @PostMapping("/{id}/retry") public Job retry(@PathVariable String id,HttpServletRequest request){var job=authorized(id,request);if(!job.state.equals("FAILED"))throw new ResponseStatusException(HttpStatus.CONFLICT,"Only failed jobs can be retried");job.state="QUEUED";job.error=null;jobs.saveAndFlush(job);audit.record("SIGNING_JOB_RETRIED",id);return view(job);}
  @GetMapping("/{id}/download") public ResponseEntity<byte[]> download(@PathVariable String id,@RequestParam(defaultValue="signed") String version,HttpServletRequest request)throws Exception{
   var job=authorized(id,request);if(job.state.equals("DELETING"))throw new ResponseStatusException(HttpStatus.GONE,"Asset retention expired");if(!Set.of("original","signed").contains(version))throw new ResponseStatusException(HttpStatus.BAD_REQUEST);if(version.equals("signed") && !job.state.equals("COMPLETED"))throw new ResponseStatusException(HttpStatus.CONFLICT,"Signed output is not ready");
-  Path file=service.directory(id).resolve(version+service.extension(job));if(!Files.isRegularFile(file))throw new ResponseStatusException(HttpStatus.NOT_FOUND);audit.record("ASSET_DOWNLOADED",id+":"+version);return ResponseEntity.ok().contentType(MediaType.parseMediaType(job.format)).header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename=\""+version+service.extension(job)+"\"").body(Files.readAllBytes(file));
+  byte[] bytes=service.readAsset(job,version+service.extension(job),128*1024*1024L);audit.record("ASSET_DOWNLOADED",id+":"+version);return ResponseEntity.ok().contentType(MediaType.parseMediaType(job.format)).header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename=\""+version+service.extension(job)+"\"").body(bytes);
  }
  @GetMapping("/{id}/report") public ResponseEntity<byte[]> report(@PathVariable String id,HttpServletRequest request)throws Exception {
   var job=authorized(id,request);if(!job.state.equals("COMPLETED"))throw new ResponseStatusException(HttpStatus.CONFLICT,"Verification report is not ready");
-  Path file=service.directory(id).resolve("report.json");if(!Files.isRegularFile(file))throw new ResponseStatusException(HttpStatus.NOT_FOUND);if(Files.size(file)>8*1024*1024)throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"Report exceeds download limit");
-  audit.record("REPORT_DOWNLOADED",id);return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename=\"verification-report.json\"").body(Files.readAllBytes(file));
+  byte[] bytes=service.readAsset(job,"report.json",8*1024*1024L);
+  audit.record("REPORT_DOWNLOADED",id);return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename=\"verification-report.json\"").body(bytes);
  }
 
 }

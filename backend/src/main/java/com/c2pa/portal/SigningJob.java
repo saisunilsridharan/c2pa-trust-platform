@@ -18,6 +18,7 @@ public class SigningJob {
  public Instant createdAt;
  public Instant completedAt;
  public int attempts;
+ @Column(length=16000) public String storageSnapshot;
  @Column(nullable=false,columnDefinition="bigint default 1") public Long workspaceId=1L;
  public SigningJob(){}
 }

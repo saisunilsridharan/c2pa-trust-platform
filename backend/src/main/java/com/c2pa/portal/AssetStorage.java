@@ -5,5 +5,7 @@ public class AssetStorage {
  @Id public Long id=1L;
  @Version public Long revision;
  public int retentionDays=30;
+ public String draftVersion;
+ public String activeVersion;
  public AssetStorage(){}
 }

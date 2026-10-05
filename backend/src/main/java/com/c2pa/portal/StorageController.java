@@ -14,9 +14,9 @@ public class StorageController {
  public record Settings(Long revision,String provider,int retentionDays){}
  public record Update(@NotNull Long revision,@Min(1) @Max(3650) int retentionDays,boolean acknowledgeDeletion){}
  private AssetStorage settings(){return storage.findById(WorkspaceContext.id()).orElseGet(()->{var settings=new AssetStorage();settings.id=WorkspaceContext.id();return storage.saveAndFlush(settings);});}
- @GetMapping @Transactional public Settings get(){var s=settings();return new Settings(s.revision,"Managed local storage",s.retentionDays);}
+ @GetMapping @Transactional public Settings get(){var s=settings();return new Settings(s.revision,s.activeVersion==null?"Managed local storage":"Versioned storage; see Private object storage",s.retentionDays);}
  @PutMapping @Transactional public Settings update(@Valid @RequestBody Update request){
   if(!request.acknowledgeDeletion())throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Acknowledge automatic deletion after retention");
-  var s=settings();if(!s.revision.equals(request.revision()))throw new ResponseStatusException(HttpStatus.CONFLICT,"Storage settings changed");s.retentionDays=request.retentionDays();storage.saveAndFlush(s);audit.record("STORAGE_RETENTION_CHANGED",String.valueOf(s.retentionDays));return new Settings(s.revision,"Managed local storage",s.retentionDays);
+  var s=settings();if(!s.revision.equals(request.revision()))throw new ResponseStatusException(HttpStatus.CONFLICT,"Storage settings changed");s.retentionDays=request.retentionDays();storage.saveAndFlush(s);audit.record("STORAGE_RETENTION_CHANGED",String.valueOf(s.retentionDays));return new Settings(s.revision,s.activeVersion==null?"Managed local storage":"Versioned storage; see Private object storage",s.retentionDays);
  }
 }

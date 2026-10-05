@@ -9,6 +9,7 @@ import PasswordPanel from "./PasswordPanel";
 import JobsPanel from "./JobsPanel";
 import WorkspacesPanel from "./WorkspacesPanel";
 import CredentialsPanel from "./CredentialsPanel";
+import StorageProvidersPanel from "./StorageProvidersPanel";
 import { setActiveWorkspace } from "./portalFetch";
 type Capability = {
   mime: string;
@@ -439,6 +440,7 @@ function App() {
                     token={token}
                     platformAdmin={user?.platformAdministrator ?? false}
                   />
+                  <StorageProvidersPanel token={token} />
                   <AdministrationPanel
                     token={token}
                     revision={state.revision}
