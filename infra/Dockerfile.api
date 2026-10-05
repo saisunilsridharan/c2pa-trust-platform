@@ -1,0 +1,19 @@
+FROM maven:3.9-eclipse-temurin-21 AS java-build
+WORKDIR /build
+COPY backend/ backend/
+RUN mvn -B -f backend/pom.xml package -DskipTests
+
+FROM rust:1.99-bookworm AS rust-build
+WORKDIR /build
+COPY c2pa-worker/ c2pa-worker/
+RUN cargo build --locked --release --manifest-path c2pa-worker/Cargo.toml -j 2
+
+FROM eclipse-temurin:21-jre-noble
+RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+WORKDIR /app/backend
+COPY --from=java-build /build/backend/target/portal-api-0.1.0.jar /app/backend/portal-api.jar
+COPY --from=rust-build /build/c2pa-worker/target/release/c2pa-worker /app/c2pa-worker/target/debug/c2pa-worker
+RUN mkdir -p /app/backend/.local && chown -R 10001:10001 /app && chmod 700 /app/backend/.local && chmod 755 /app/c2pa-worker/target/debug/c2pa-worker
+USER 10001:10001
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "portal-api.jar", "--server.address=0.0.0.0"]
