@@ -171,3 +171,26 @@ select {
   font: inherit;
   background: white;
 }
+
+.table-wrap {
+  overflow-x: auto;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+th,
+td {
+  text-align: left;
+  vertical-align: top;
+  padding: 12px;
+  border-bottom: 1px solid #dce5e5;
+}
+h3 {
+  margin-top: 32px;
+}
+.fingerprint {
+  overflow-wrap: anywhere;
+  max-width: 360px;
+}

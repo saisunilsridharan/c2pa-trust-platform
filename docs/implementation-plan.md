@@ -14,14 +14,14 @@ The current worker invocation is a bounded local process for development inspect
 
 ## Completed development signing slice
 
-UI-created development identities, reviewed user declarations, JPEG/PNG signed downloads, post-sign validation, original ingredient retention, and tampering checks are implemented. Local files and synchronous workers are development-only; public certificate trust and production key providers remain outstanding.
+UI-created development identities, reviewed user declarations, JPEG/PNG signed downloads, post-sign validation, original ingredient retention, and tampering checks are implemented. Configuration history/rollback, audit records, and development certificate status/rotation are implemented. Local files and synchronous workers are development-only; public certificate trust and production key providers remain outstanding.
 
 ## Next: production signing vertical slice
 
 1. Add protected UI enrollment and workspace roles; use Spring Security and OIDC.
 2. Add Flyway migrations and PostgreSQL integration tests.
 3. Implement UI storage setup with test-before-activation and encrypted write-only credentials.
-4. Add KMS/HSM identity providers, certificate validation, expiry status, and UI rotation. The development provider is implemented.
+4. Add KMS/HSM providers and production certificate lifecycle. Development expiry status and UI rotation are implemented.
 5. Extend the implemented Rust signing and inspection with isolated queued workers, timestamping, and production trust policy.
 6. Extend the implemented upload, signing review, signed download, and verification UI with durable jobs and progress.
 7. Validate JPEG and PNG signing, tampering detection, provenance preservation, and independent-verifier compatibility.

@@ -17,8 +17,9 @@ import java.util.concurrent.TimeUnit;
 public class VerificationController {
  private final ConfigurationRepository repository;
  private final ObjectMapper mapper;
- public VerificationController(ConfigurationRepository repository,ObjectMapper mapper) {
-  this.repository=repository; this.mapper=mapper;
+ private final AuditService audit;
+ public VerificationController(ConfigurationRepository repository,ObjectMapper mapper,AuditService audit) {
+  this.repository=repository; this.mapper=mapper;this.audit=audit;
  }
  @PostMapping(consumes="multipart/form-data")
  public JsonNode inspect(@RequestPart("file") MultipartFile file) throws Exception {
@@ -46,7 +47,9 @@ public class VerificationController {
    if(!process.waitFor(30,TimeUnit.SECONDS)) throw new ResponseStatusException(HttpStatus.GATEWAY_TIMEOUT,"Inspection timed out");
    if(process.exitValue()!=0) throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"No readable C2PA manifest, or malformed content");
    if(Files.size(output)>8*1024*1024) throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"Manifest report exceeds limits");
-   return mapper.readTree(output.toFile());
+   JsonNode report=mapper.readTree(output.toFile());
+   audit.record("CONTENT_INSPECTED",report.path("validation_state").asText("unknown"));
+   return report;
   } finally {
    if(process!=null && process.isAlive()){process.destroyForcibly();process.waitFor(5,TimeUnit.SECONDS);}
    try(var files=Files.list(directory)){for(Path path:files.toList())Files.deleteIfExists(path);}

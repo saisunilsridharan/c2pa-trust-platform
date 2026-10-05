@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 import SigningPanel from "./SigningPanel";
+import AdministrationPanel from "./AdministrationPanel";
 type Settings = {
   organizationName: string;
   profileName: string;
@@ -243,6 +244,17 @@ function App() {
                   </button>
                 </div>
               </section>
+              <AdministrationPanel
+                token={token}
+                revision={state.revision}
+                onChange={async () => {
+                  const next = await request("");
+                  setState(next);
+                  setSettings(next.draft);
+                  setTested(false);
+                  setSaved(true);
+                }}
+              />
               <SigningPanel
                 token={token}
                 active={state.active}

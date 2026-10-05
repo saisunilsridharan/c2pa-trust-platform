@@ -11,9 +11,11 @@ React + TypeScript portal, Java 21 Spring Boot API with Swagger UI, and a Rust w
 - Multipart JPEG/PNG provenance inspection through Java and the Rust SDK. Reports contain validation details; a readable manifest is not proof of trusted content.
 - UI-created development signing identity with owner-only private-key storage; explicit development-only acknowledgment.
 - JPEG/PNG signing with reviewed public creator/title/AI declarations, signed download, validation, and existing provenance preservation.
+- UI development certificate status, expiry checks, and rotation.
+- Configuration history, revision-protected rollback, and paginated audit records.
 - Swagger UI documents the APIs and supports the administrator token through its Authorize button.
 
-Production signing identities and KMS/HSM, storage providers, production authentication, secret encryption, audit history, queueing, certificate rotation, and configuration rollback are not implemented yet. Development signing uses a local private key created by the backend; no private-key entry or export is offered. See [the implementation roadmap](docs/implementation-plan.md).
+Production signing identities and KMS/HSM, storage providers, production authentication, secret encryption, durable queueing, production certificate lifecycle, workspace roles, and tamper-evident audit storage are not implemented yet. Development signing uses a local private key created by the backend; no private-key entry or export is offered. See [the implementation roadmap](docs/implementation-plan.md).
 
 ## Development
 
@@ -61,6 +63,14 @@ Development defaults to a persistent H2 database in `backend/.local/`. PostgreSQ
 
 Application settings are stored in the database and survive backend restarts. Bootstrap authentication survives through its protected local token file. No storage credentials are stored yet. The development signing key stays in owner-only `backend/.local/development-identity/`; this file-based development provider is not suitable for production.
 
+## Administration and recovery
+
+The administration panel shows certificate validity, expiry, and SHA-256 fingerprint. Explicit UI rotation switches future signing requests to a new identity. Expired certificates cannot sign. Existing keys/certificates are retained in owner-only version directories under `backend/.local/development-identities/` so in-flight jobs keep a stable pair. The atomic current pointer survives restart. Older installations continue using `backend/.local/development-identity/` until rotation.
+
+Activation and rollback create configuration snapshots. Restoring a version replaces active settings and the draft as a new revision; stale revisions are rejected. Existing active settings are imported as RECOVERED on first access. Versions overwritten before this release cannot be reconstructed.
+
+Audit records cover draft saves, activation, rollback, identity creation/rotation, successful signing, and completed inspection (including invalid integrity results). They exclude tokens, private keys, file contents, and creator declarations. They identify the shared local administrator; per-user attribution and tamper-evident storage are still pending. Rejected requests and process failures are not audited yet. History and audit views support pages of 50 records.
+
 ## Checks
 
 ```sh
@@ -70,4 +80,4 @@ cd frontend
 npm run build
 ```
 
-Java integration tests cover denied unauthenticated access, configuration persistence, revision conflict, activation, invalid input, and OpenAPI authentication metadata. Worker integration is additionally checked with representative manifest-bearing and malformed files. Run `python scripts/smoke-signing.py` against the running backend to exercise PNG signing, claims, re-signing/provenance preservation, and tampering detection. This smoke test creates a development identity if needed and activates the current draft only when no profile is active; PNG must be enabled. No universal format support or production trust is claimed.
+Java tests cover access control, revisions, history, rollback, audits, real certificate generation/rotation, restart persistence, expiration, stable in-flight material, and OpenAPI metadata. Worker integration is additionally checked with representative manifest-bearing and malformed files. Run `python scripts/smoke-signing.py` against the running backend to exercise PNG signing, claims, re-signing/provenance preservation, and tampering detection. This smoke test creates a development identity if needed and activates the current draft only when no profile is active; PNG must be enabled. No universal format support or production trust is claimed.

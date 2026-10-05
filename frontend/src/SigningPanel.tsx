@@ -23,6 +23,7 @@ export default function SigningPanel({
     [ai, setAi] = useState("unspecified"),
     [reviewed, setReviewed] = useState(false);
   useEffect(() => setReviewed(false), [active]);
+  useEffect(() => setAvailable(initialAvailable), [initialAvailable]);
   async function run(action: () => Promise<void>) {
     setBusy(true);
     setMessage("");
@@ -70,9 +71,12 @@ export default function SigningPanel({
                   throw new Error(
                     `Identity creation failed (${response.status}).`,
                   );
-                setAvailable((await response.json()).available);
+                const identity = await response.json();
+                setAvailable(identity.available);
                 setMessage(
-                  "Development identity created. Its private key stays on the backend.",
+                  identity.available
+                    ? "Development identity is ready. Its private key stays on the backend."
+                    : `Identity status: ${identity.state}. Rotate it in Administration & recovery.`,
                 );
               })
             }

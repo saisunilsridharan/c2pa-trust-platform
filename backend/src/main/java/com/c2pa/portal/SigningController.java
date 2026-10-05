@@ -16,12 +16,18 @@ import java.util.concurrent.TimeUnit;
 public class SigningController {
  private final DevelopmentIdentity identity;
  private final ConfigurationRepository repository;
- private final ObjectMapper mapper;
- public SigningController(DevelopmentIdentity identity,ConfigurationRepository repository,ObjectMapper mapper){this.identity=identity;this.repository=repository;this.mapper=mapper;}
- @GetMapping("/admin/signing-identity") public Map<String,Object> identity(){return Map.of("available",identity.available(),"provider","development","productionTrusted",false);}
- @PostMapping("/admin/signing-identity/development") public Map<String,Object> create(@RequestBody Map<String,Boolean> request) throws Exception {
+ private final ObjectMapper mapper; private final AuditService audit;
+ public SigningController(DevelopmentIdentity identity,ConfigurationRepository repository,ObjectMapper mapper,AuditService audit){this.identity=identity;this.repository=repository;this.mapper=mapper;this.audit=audit;}
+ @GetMapping("/admin/signing-identity") public DevelopmentIdentity.Status identity(){return identity.status();}
+ @PostMapping("/admin/signing-identity/development") public DevelopmentIdentity.Status create(@RequestBody Map<String,Boolean> request) throws Exception {
   if(!Boolean.TRUE.equals(request.get("acknowledgeUntrusted")))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Acknowledge development-only identity");
-  identity.create();return identity();
+  var result=identity.create();if(result.created())audit.record("DEVELOPMENT_IDENTITY_CREATED",result.status().fingerprint());return result.status();
+ }
+ public record Rotation(@jakarta.validation.constraints.NotBlank String expectedFingerprint,boolean acknowledgeUntrusted) {}
+ @PostMapping("/admin/signing-identity/development/rotate")
+ public DevelopmentIdentity.Status rotate(@jakarta.validation.Valid @RequestBody Rotation request) throws Exception {
+  if(!request.acknowledgeUntrusted())throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Acknowledge development-only rotation");
+  var result=identity.rotate(request.expectedFingerprint());audit.record("DEVELOPMENT_IDENTITY_ROTATED",result.fingerprint());return result;
  }
  @PostMapping(value="/signing",consumes="multipart/form-data")
  public ResponseEntity<byte[]> sign(@RequestPart("file") MultipartFile file,@RequestParam String creator,@RequestParam String title,@RequestParam(required=false,defaultValue="unspecified") String aiDisclosure,@RequestParam boolean acknowledgePublicClaims) throws Exception {
@@ -38,6 +44,7 @@ public class SigningController {
   if(format==null || !settings.formats().contains(format))throw new ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE,"Unsupported or disabled content format");
   Path worker=Path.of("../c2pa-worker/target/debug/c2pa-worker").toAbsolutePath().normalize();
   if(!Files.isExecutable(worker))throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Build the Rust worker first");
+  DevelopmentIdentity.Material material=identity.material();
   Path directory=Files.createTempDirectory("c2pa-signing-");Process process=null;
   try {
    String extension=format.equals("image/png")?".png":".jpg";
@@ -45,9 +52,10 @@ public class SigningController {
    var declarations=Map.of("creator",creator,"organization",settings.organizationName(),"profile",settings.profileName(),"configurationRevision",record.activeRevision==null?record.revision:record.activeRevision,"aiDisclosure",aiDisclosure,"source","user-declared","developmentIdentity",true);
    var definition=Map.of("claim_generator_info",List.of(Map.of("name","C2PA Trust Portal","version","0.2.0")),"title",title,"format",format,"assertions",List.of(Map.of("label","com.c2pa.portal.declarations","data",declarations)));
    Files.writeString(manifest,mapper.writeValueAsString(definition));
-   process=new ProcessBuilder(worker.toString(),"sign",input.toString(),output.toString(),manifest.toString(),identity.certificate().toString(),identity.key().toString()).redirectOutput(directory.resolve("report.json").toFile()).redirectError(directory.resolve("error.log").toFile()).start();
+   process=new ProcessBuilder(worker.toString(),"sign",input.toString(),output.toString(),manifest.toString(),material.certificate().toString(),material.key().toString()).redirectOutput(directory.resolve("report.json").toFile()).redirectError(directory.resolve("error.log").toFile()).start();
    if(!process.waitFor(45,TimeUnit.SECONDS))throw new ResponseStatusException(HttpStatus.GATEWAY_TIMEOUT,"Signing timed out");
    if(process.exitValue()!=0 || !Files.exists(output))throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"Signing failed: unsupported content, invalid provenance, or expired development certificate");
+   audit.record("CONTENT_SIGNED",material.fingerprint()+"/configuration-"+(record.activeRevision==null?record.revision:record.activeRevision));
    return ResponseEntity.ok().contentType(MediaType.parseMediaType(format)).header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename=\"signed-content"+extension+"\"").header("X-Signing-Identity","development-untrusted").body(Files.readAllBytes(output));
   } finally {
    if(process!=null && process.isAlive()){process.destroyForcibly();process.waitFor(5,TimeUnit.SECONDS);}
