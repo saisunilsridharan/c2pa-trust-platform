@@ -8,9 +8,12 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 @Service public class WorkerExecution {
- private final HardwareSigning hardware;
- public WorkerExecution(HardwareSigning hardware){this.hardware=hardware;}
+ private final TrustPolicy trust;private final HardwareSigning hardware;
+ public WorkerExecution(HardwareSigning hardware,TrustPolicy trust){this.trust=trust;this.hardware=hardware;}
  public int sign(Long workspace,Path worker,Path input,Path output,Path manifest,Path certificate,String key,Path report,Path error,int timeout)throws Exception {
+  return sign(workspace,worker,input,output,manifest,certificate,key,report,error,timeout,null);
+ }
+ public int sign(Long workspace,Path worker,Path input,Path output,Path manifest,Path certificate,String key,Path report,Path error,int timeout,String trustSnapshot)throws Exception {
   Process process=null;Path bridge=null;ServerSocketChannel server=null;AtomicReference<SocketChannel> peer=new AtomicReference<>();Thread handler=null;
   try{
    List<String> command=new ArrayList<>(List.of(worker.toString(),"sign",input.toString(),output.toString(),manifest.toString(),certificate.toString(),key));
@@ -22,6 +25,7 @@ import java.util.concurrent.atomic.AtomicReference;
     });
     command.set(1,"sign-pkcs11");command.set(6,socket.toString());
    }
+   if(trustSnapshot!=null){Path policy=report.getParent().resolve("trust-policy.json");Files.writeString(policy,trust.workerConfiguration(trustSnapshot));command.add(policy.toString());}
    process=new ProcessBuilder(command).redirectOutput(report.toFile()).redirectError(error.toFile()).start();
    if(!process.waitFor(timeout,TimeUnit.SECONDS))throw new IOException("Signing timed out");return process.exitValue();
   }finally{

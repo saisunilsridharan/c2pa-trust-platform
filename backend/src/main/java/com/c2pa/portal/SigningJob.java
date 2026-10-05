@@ -25,6 +25,7 @@ public class SigningJob {
  public String resultAttempt;
  @Column(length=8000) public String attemptDirectories;
  @Column(length=16000) public String storageSnapshot;
+ @Column(length=80000) public String trustSnapshot;
  @Column(nullable=false,columnDefinition="bigint default 1") public Long workspaceId=1L;
  public SigningJob(){}
 }

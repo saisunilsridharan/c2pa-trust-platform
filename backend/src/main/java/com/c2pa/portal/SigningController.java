@@ -14,10 +14,10 @@ import java.util.concurrent.TimeUnit;
 @RequestMapping("/api/v1")
 @SecurityRequirement(name="adminToken")
 public class SigningController {
- private final WorkerExecution execution;private final SigningChoices choices;private final DevelopmentIdentity identity;
+ private final TrustPolicy trust;private final WorkerExecution execution;private final SigningChoices choices;private final DevelopmentIdentity identity;
  private final ConfigurationRepository repository;
  private final ObjectMapper mapper; private final AuditService audit;
- public SigningController(DevelopmentIdentity identity,ConfigurationRepository repository,ObjectMapper mapper,AuditService audit,SigningChoices choices,WorkerExecution execution){this.execution=execution;this.choices=choices;this.identity=identity;this.repository=repository;this.mapper=mapper;this.audit=audit;}
+ public SigningController(DevelopmentIdentity identity,ConfigurationRepository repository,ObjectMapper mapper,AuditService audit,SigningChoices choices,WorkerExecution execution,TrustPolicy trust){this.trust=trust;this.execution=execution;this.choices=choices;this.identity=identity;this.repository=repository;this.mapper=mapper;this.audit=audit;}
  @GetMapping("/admin/signing-identity") public DevelopmentIdentity.Status identity(){return identity.status();}
  @PostMapping("/admin/signing-identity/development") public DevelopmentIdentity.Status create(@RequestBody Map<String,Boolean> request) throws Exception {
   if(!Boolean.TRUE.equals(request.get("acknowledgeUntrusted")))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Acknowledge development-only identity");
@@ -48,15 +48,16 @@ public class SigningController {
   if(format==null || !settings.formats().contains(format))throw new ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE,"Unsupported or disabled content format");
   Path worker=Path.of("../c2pa-worker/target/debug/c2pa-worker").toAbsolutePath().normalize();
   if(!Files.isExecutable(worker))throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Build the Rust worker first");
-  DevelopmentIdentity.Material material=selected.material();
+  DevelopmentIdentity.Material material=selected.material();String trustSnapshot=trust.snapshot(WorkspaceContext.id());
   Path directory=Files.createTempDirectory("c2pa-signing-");Process process=null;
   try {
    String extension=ContentFormats.extension(format);
    Path input=directory.resolve("original"+extension),output=directory.resolve("signed"+extension),manifest=directory.resolve("manifest.json");file.transferTo(input);
-   var declarations=Map.of("creator",creator,"organization",settings.organizationName(),"profile",settings.profileName(),"configurationRevision",selected.profileRevision(),"aiDisclosure",aiDisclosure,"source","user-declared","developmentIdentity",material.development());
+   var declarations=new LinkedHashMap<String,Object>(Map.of("creator",creator,"organization",settings.organizationName(),"profile",settings.profileName(),"configurationRevision",selected.profileRevision(),"aiDisclosure",aiDisclosure,"source","user-declared","developmentIdentity",material.development()));
+   if(trustSnapshot!=null)declarations.put("privateTrustPolicyVersion",mapper.readTree(trustSnapshot).path("versionId").asText());
    var definition=Map.of("claim_generator_info",List.of(Map.of("name","C2PA Trust Portal","version","0.2.0")),"title",title,"format",format,"assertions",List.of(Map.of("label","com.c2pa.portal.declarations","data",declarations)));
    Files.writeString(manifest,mapper.writeValueAsString(definition));
-   int exit=execution.sign(WorkspaceContext.id(),worker,input,output,manifest,material.certificate(),material.key().toString(),directory.resolve("report.json"),directory.resolve("error.log"),45);
+   int exit=execution.sign(WorkspaceContext.id(),worker,input,output,manifest,material.certificate(),material.key().toString(),directory.resolve("report.json"),directory.resolve("error.log"),45,trustSnapshot);
    if(exit!=0 || !Files.exists(output))throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"Signing failed: unsupported content, invalid provenance, or invalid signing certificate");
    audit.record("CONTENT_SIGNED",material.fingerprint()+"/configuration-"+(selected.profileRevision()));
    return ResponseEntity.ok().contentType(MediaType.parseMediaType(format)).header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename=\"signed-content"+extension+"\"").header("X-Signing-Identity",material.development()?"development-untrusted":"private-certificate-trust-unverified").body(Files.readAllBytes(output));

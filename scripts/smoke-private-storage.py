@@ -240,6 +240,10 @@ def run(postgres_bin=None, softhsm_dir=None):
             call('/admin/configuration/draft/activate', {'revision': configuration['revision']})
             call('/admin/signing-identity/development', {'acknowledgeUntrusted': True})
             configuration = call('/portal/configuration')
+            original_directory = backend / '.local/development-identities'
+            original_directory = original_directory / (original_directory / 'current').read_text().strip()
+            original_chain = (original_directory / 'chain.pem').read_text()
+            original_anchor = '-----BEGIN CERTIFICATE-----' + original_chain.split('-----BEGIN CERTIFICATE-----')[-1]
             choice = call('/admin/signing-options', {'label': 'Private editorial choice',
                 'expectedProfileRevision': configuration['activeRevision'],
                 'expectedIdentityFingerprint': configuration['signingFingerprint'], 'acknowledgePublicClaims': True})
@@ -307,6 +311,28 @@ def run(postgres_bin=None, softhsm_dir=None):
                       'expectedIdentityFingerprint': configuration['signingFingerprint'],
                       'signingOptionId': choice['id'], 'signingOptionRevision': choice['revision']}
             data, headers = multipart(fields, 'sample.png', png)
+            sample_signed = call('/signing', data=data, extra=headers, raw=True)
+            trust_state = call('/admin/trust-policy')
+            trust_state = call('/admin/trust-policy/draft', {'revision': trust_state['revision'],
+                'configuration': {'privateAnchorsPem': original_anchor, 'requireTrustedSigning': True}}, method='PUT')
+            policy_id = trust_state['draft']['id']
+            trust_selection = {'revision': trust_state['revision'], 'versionId': policy_id, 'acknowledgePrivatePolicy': True}
+            denied(lambda: call('/admin/trust-policy/activate', trust_selection), 409)
+            wrong_directory = backend / '.local/development-identities'
+            wrong_directory = wrong_directory / (wrong_directory / 'current').read_text().strip()
+            wrong_anchor = '-----BEGIN CERTIFICATE-----' + (wrong_directory / 'chain.pem').read_text().split('-----BEGIN CERTIFICATE-----')[-1]
+            trust_state = call('/admin/trust-policy/draft', {'revision': trust_state['revision'],
+                'configuration': {'privateAnchorsPem': wrong_anchor, 'requireTrustedSigning': True}}, method='PUT')
+            wrong_data, wrong_headers = multipart({'revision': trust_state['revision'], 'versionId': trust_state['draft']['id']}, 'sample.png', sample_signed)
+            denied(lambda: call('/admin/trust-policy/test', data=wrong_data, extra=wrong_headers), 502)
+            assert call('/admin/trust-policy')['draft']['testedAt'] is None
+            trust_selection['revision'] = trust_state['revision']
+            sample_data, sample_headers = multipart({'revision': trust_state['revision'], 'versionId': policy_id}, 'sample.png', sample_signed)
+            call('/admin/trust-policy/test', data=sample_data, extra=sample_headers)
+            denied(lambda: call('/admin/trust-policy/activate', {'revision': call('/admin/trust-policy', workspace=workspace)['revision'],
+                'versionId': policy_id, 'acknowledgePrivatePolicy': True}, workspace=workspace), 404)
+            trust_state = call('/admin/trust-policy/activate', trust_selection)
+            assert call('/portal/trust-policy')['requireTrustedSigning']
             session = token
             api_key = call('/auth/api-keys', {'label': 'Isolated worker integration', 'scopes': ['READ', 'SIGN', 'VERIFY'], 'days': 1})
             token = api_key['token']
@@ -323,6 +349,13 @@ def run(postgres_bin=None, softhsm_dir=None):
                 'expectedIdentityFingerprint': second_choice['fingerprint']}, 'sample.png', png)
             denied(lambda: call('/jobs', data=changed_data, extra={**changed_headers, 'Idempotency-Key': request_key}), 409)
             token = session
+            # Later policy activation must not alter the job's captured strict policy.
+            trust_state = call('/admin/trust-policy/draft', {'revision': trust_state['revision'],
+                'configuration': {'privateAnchorsPem': '', 'requireTrustedSigning': False}}, method='PUT')
+            reset_selection = {'revision': trust_state['revision'], 'versionId': trust_state['draft']['id'], 'acknowledgePrivatePolicy': True}
+            sample_data, sample_headers = multipart({'revision': trust_state['revision'], 'versionId': reset_selection['versionId']}, 'sample.png', sample_signed)
+            call('/admin/trust-policy/test', data=sample_data, extra=sample_headers)
+            call('/admin/trust-policy/activate', reset_selection)
             choice = call('/admin/signing-options/' + choice['id'], {'revision': choice['revision'], 'enabled': False}, method='PUT')
             assert len(call('/portal/signing-options')) == 1
             denied(lambda: call('/jobs', data=data, extra={**headers, 'Idempotency-Key': secrets.token_hex(16)}), 409)
@@ -336,7 +369,9 @@ def run(postgres_bin=None, softhsm_dir=None):
             assert len(OBJECTS) == 3
             assert call(f'/jobs/{job["id"]}/download?version=original', raw=True) == png
             report = json.loads(call(f'/jobs/{job["id"]}/report', raw=True))
-            assert report['validation_state'] == 'Valid'
+            assert report['validation_state'] == 'Trusted'
+            assert report['portal_trust_policy']['versionId'] == policy_id
+            assert not report['portal_trust_policy']['publicTrustVerified']
             assert choice['id'] in json.dumps(report)
             assert 'New default organization' not in json.dumps(report)
             signed = call(f'/jobs/{job["id"]}/download', raw=True)
@@ -398,7 +433,7 @@ def run(postgres_bin=None, softhsm_dir=None):
             data, headers = multipart({'password': backup_password, 'acknowledgeRestore': 'true'}, 'key.backup', backup)
             assert call('/admin/security/restore', data=data, extra=headers)['available']
             assert call(f'/jobs/{job["id"]}/download', raw=True) == signed
-            print(('PostgreSQL' if postgres_bin else 'H2') + (': PKCS#11/non-exportable SoftHSM signing, ' if softhsm_dir else ': ') + 'approved signing choices/rotation/withdrawal, MFA, one-time account recovery, migrations, leased native C2PA job, private storage, SigV4, scoped API-key signing/revocation, provider snapshots, notifications, HMAC webhooks, audit checkpoint, workspace isolation, restart persistence and encryption-key recovery passed.')
+            print(('PostgreSQL' if postgres_bin else 'H2') + (': PKCS#11/non-exportable SoftHSM signing, ' if softhsm_dir else ': ') + 'private trust policy/snapshots, approved signing choices/rotation/withdrawal, MFA, one-time account recovery, migrations, leased native C2PA job, private storage, SigV4, scoped API-key signing/revocation, provider snapshots, notifications, HMAC webhooks, audit checkpoint, workspace isolation, restart persistence and encryption-key recovery passed.')
         finally:
             stop(); fixture.shutdown(); fixture.server_close()
             if postgres is not None:

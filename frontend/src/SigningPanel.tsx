@@ -1,3 +1,4 @@
+import { TrustPolicyStatus } from "./TrustPolicyPanel";
 import {
   SigningChoiceSelector,
   type SigningChoice,
@@ -53,6 +54,7 @@ export default function SigningPanel({
   return (
     <section>
       <h2>Sign content</h2>
+      <TrustPolicyStatus token={token} />
       <SigningChoiceSelector
         token={token}
         value={choice}

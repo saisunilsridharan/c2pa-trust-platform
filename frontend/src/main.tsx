@@ -1,3 +1,4 @@
+import TrustPolicyPanel from "./TrustPolicyPanel";
 import HardwareIdentitiesPanel from "./HardwareIdentitiesPanel";
 import SigningChoicesPanel from "./SigningChoicesPanel";
 import { portalFetch as connectionFetch, workspaceFetch } from "./portalFetch";
@@ -474,6 +475,7 @@ function App() {
                   <StorageProvidersPanel token={token} />
                   <WebhooksPanel token={token} />
                   <ProcessingPanel token={token} />
+                  <TrustPolicyPanel token={token} />
                   <HardwareIdentitiesPanel
                     token={token}
                     profileRevision={state.activeRevision}

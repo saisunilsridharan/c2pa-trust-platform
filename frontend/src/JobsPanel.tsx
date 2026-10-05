@@ -1,3 +1,4 @@
+import { TrustPolicyStatus } from "./TrustPolicyPanel";
 import {
   SigningChoiceSelector,
   type SigningChoice,
@@ -126,6 +127,7 @@ export default function JobsPanel({
   return (
     <section>
       <h2>Saved assets & signing jobs</h2>
+      <TrustPolicyStatus token={token} />
       {admin && operations && (
         <p>
           Queue: {String(operations.queued)} waiting ·{" "}

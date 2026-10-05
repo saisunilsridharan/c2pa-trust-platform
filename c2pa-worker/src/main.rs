@@ -11,12 +11,13 @@ fn execute() -> Result<(), Box<dyn std::error::Error>> {
         args.first().map(String::as_str),
         Some("sign" | "sign-pkcs11")
     ) {
-        if args.len() != 6 {
+        if args.len() != 6 && args.len() != 7 {
             return Err("Usage: sign <input> <output> <manifest> <certificate-chain> <key>".into());
         }
         let definition = std::fs::read_to_string(&args[3])?;
-        let mut builder = c2pa::Builder::from_context(c2pa::Context::new())
-            .with_definition(definition.as_str())?;
+        let (context, policy) = build_context(args.get(6))?;
+        let mut builder =
+            c2pa::Builder::from_context(context).with_definition(definition.as_str())?;
         builder.set_intent(c2pa::BuilderIntent::Edit);
         let format = match std::path::Path::new(&args[1])
             .extension()
@@ -72,18 +73,52 @@ fn execute() -> Result<(), Box<dyn std::error::Error>> {
             c2pa::create_signer::from_files(&args[4], &args[5], c2pa::SigningAlg::Es256, None)?
         };
         builder.sign_file(signer.as_ref(), &args[1], &args[2])?;
-        let reader = c2pa::Reader::from_context(c2pa::Context::new()).with_file(&args[2])?;
-        if reader.validation_state() == c2pa::ValidationState::Invalid {
+        let reader =
+            c2pa::Reader::from_context(build_context(args.get(6))?.0).with_file(&args[2])?;
+        if reader.validation_state() == c2pa::ValidationState::Invalid
+            || (policy.as_ref().is_some_and(|p| p["requireTrusted"] == true)
+                && reader.validation_state() != c2pa::ValidationState::Trusted)
+        {
             std::fs::remove_file(&args[2])?;
             return Err("Signed output failed validation".into());
         }
-        println!("{}", reader.json());
+        report(&reader, policy)?;
     } else {
-        if args.len() != 1 {
-            return Err("Usage: c2pa-worker <asset-path>".into());
-        }
-        let reader = c2pa::Reader::from_context(c2pa::Context::new()).with_file(&args[0])?;
-        println!("{}", reader.json());
+        let (asset, policy_path) = if args.len() == 3 && args[0] == "inspect" {
+            (&args[1], Some(&args[2]))
+        } else if args.len() == 1 {
+            (&args[0], None)
+        } else {
+            return Err("Usage: c2pa-worker <asset-path> or inspect <asset-path> <policy>".into());
+        };
+        let (context, policy) = build_context(policy_path)?;
+        let reader = c2pa::Reader::from_context(context).with_file(asset)?;
+        report(&reader, policy)?;
     }
+    Ok(())
+}
+
+fn build_context(
+    path: Option<&String>,
+) -> Result<(c2pa::Context, Option<serde_json::Value>), Box<dyn std::error::Error>> {
+    let baseline = serde_json::json!({"core":{"allowed_network_hosts":[],"allow_redirects":false},"verify":{"ocsp_fetch":false,"remote_manifest_fetch":false}});
+    let context = c2pa::Context::new().with_settings(baseline)?;
+    if let Some(path) = path {
+        let policy: serde_json::Value = serde_json::from_slice(&std::fs::read(path)?)?;
+        let context = context.with_settings(policy["settings"].clone())?;
+        Ok((context, Some(policy)))
+    } else {
+        Ok((context, None))
+    }
+}
+fn report(
+    reader: &c2pa::Reader,
+    policy: Option<serde_json::Value>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut result: serde_json::Value = serde_json::from_str(&reader.json())?;
+    if let Some(policy) = policy {
+        result["portal_trust_policy"] = serde_json::json!({"versionId":policy["versionId"],"source":policy["source"],"requireTrustedSigning":policy["requireTrusted"],"publicTrustVerified":false});
+    }
+    println!("{result}");
     Ok(())
 }
