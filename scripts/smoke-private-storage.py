@@ -21,6 +21,7 @@ import urllib.request
 import zlib
 import select
 import shlex
+import runpy
 
 ROOT = Path(__file__).resolve().parent.parent
 ACCESS, SECRET = secrets.token_hex(16), secrets.token_hex(32)
@@ -183,7 +184,7 @@ def initialize_token(command, environment, so_pin, user_pin):
 def chunk(kind, data):
     return struct.pack('!I', len(data)) + kind + data + struct.pack('!I', zlib.crc32(kind + data))
 
-def run(postgres_bin=None, softhsm_dir=None, timestamps=False):
+def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, formats=False):
     global TSA_MODE
     assert (ROOT / 'backend/target/portal-api-0.1.0.jar').is_file(), 'Build the Java API first'
     assert (ROOT / 'c2pa-worker/target/debug/c2pa-worker').is_file(), 'Build the Rust worker first'
@@ -316,6 +317,10 @@ def run(postgres_bin=None, softhsm_dir=None, timestamps=False):
             assert 'keyPath' not in choice and 'certificatePath' not in choice
             assert call('/portal/signing-options', workspace=workspace) == []
             denied(lambda: call('/admin/signing-options/' + choice['id'], {'revision': choice['revision'], 'enabled': False}, method='PUT', workspace=workspace), 404)
+            if namespace:
+                initial_processing = call('/admin/processing')
+                assert call('/admin/processing/test-sandbox', {})['namespaceIsolationAvailable']
+                call('/admin/processing', {**initial_processing, 'sandboxMode': 'NAMESPACE'}, method='PUT')
             if softhsm_dir:
                 # Import only a disposable fixture key into a real, non-exportable software token.
                 # Production hardware keys are provisioned separately and never uploaded to the portal.
@@ -366,7 +371,11 @@ def run(postgres_bin=None, softhsm_dir=None, timestamps=False):
             assert second_choice['fingerprint'] != choice['fingerprint']
             assert len(call('/portal/signing-options')) == 2
             processing = call('/admin/processing')
-            call('/admin/processing', {**processing, 'workerTimeoutSeconds': 30, 'maxAttempts': 2}, method='PUT')
+            host = call('/admin/processing/test-sandbox', {})
+            assert host['resourceLimitsAvailable']
+            if not host['namespaceIsolationAvailable']:
+                denied(lambda: call('/admin/processing', {**processing, 'sandboxMode': 'NAMESPACE'}, method='PUT'), 400)
+            call('/admin/processing', {**processing, 'workerTimeoutSeconds': 30, 'maxAttempts': 2, 'maxMemoryMb': 768, 'maxCpuSeconds': 30}, method='PUT')
             checkpoint = call('/admin/audit-integrity/checkpoint')
             assert call('/admin/audit-integrity')['valid']
             png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('!2I5B', 2, 2, 8, 2, 0, 0, 0))
@@ -437,12 +446,15 @@ def run(postgres_bin=None, softhsm_dir=None, timestamps=False):
             denied(lambda: call('/jobs', data=stale_data, extra={**stale_headers, 'Idempotency-Key': secrets.token_hex(16)}), 409)
             request_key = secrets.token_hex(16)
             job = call('/jobs', data=data, extra={**headers, 'Idempotency-Key': request_key})
+            assert job['maxMemoryMb'] == 768 and job['maxCpuSeconds'] == 30 and job['sandboxMode'] == ('NAMESPACE' if namespace else 'LIMITED')
             assert call('/jobs', data=data, extra={**headers, 'Idempotency-Key': request_key})['id'] == job['id']
             changed_data, changed_headers = multipart({**fields, 'signingOptionId': second_choice['id'],
                 'signingOptionRevision': second_choice['revision'], 'expectedProfileRevision': second_choice['profileRevision'],
                 'expectedIdentityFingerprint': second_choice['fingerprint']}, 'sample.png', png)
             denied(lambda: call('/jobs', data=changed_data, extra={**changed_headers, 'Idempotency-Key': request_key}), 409)
             token = session
+            future_limits = call('/admin/processing')
+            call('/admin/processing', {**future_limits, 'maxMemoryMb': 1024, 'maxCpuSeconds': 45}, method='PUT')
             if timestamps:
                 timestamp_state = call('/admin/timestamps/draft', {'revision': timestamp_state['revision'], 'configuration': {'enabled': False}}, method='PUT')
                 disabled_timestamp = {'revision': timestamp_state['revision'], 'versionId': timestamp_state['draft']['id'], 'acknowledgePrivateTimestamp': True}
@@ -466,6 +478,7 @@ def run(postgres_bin=None, softhsm_dir=None, timestamps=False):
                 if job['state'] in ['COMPLETED', 'FAILED']: break
                 time.sleep(.2)
             assert job['state'] == 'COMPLETED', job['state']
+            assert job['maxMemoryMb'] == 768 and job['maxCpuSeconds'] == 30
             assert len(OBJECTS) == 3
             assert call(f'/jobs/{job["id"]}/download?version=original', raw=True) == png
             report = json.loads(call(f'/jobs/{job["id"]}/report', raw=True))
@@ -536,7 +549,39 @@ def run(postgres_bin=None, softhsm_dir=None, timestamps=False):
             data, headers = multipart({'password': backup_password, 'acknowledgeRestore': 'true'}, 'key.backup', backup)
             assert call('/admin/security/restore', data=data, extra=headers)['available']
             assert call(f'/jobs/{job["id"]}/download', raw=True) == signed
-            print(('PostgreSQL' if postgres_bin else 'H2') + (': PKCS#11/non-exportable SoftHSM signing, ' if softhsm_dir else ': ') + ('RFC 3161 timestamps/snapshots, ' if timestamps else '') + 'private trust policy/snapshots, approved signing choices/rotation/withdrawal, MFA, one-time account recovery, migrations, leased native C2PA job, private storage, SigV4, scoped API-key signing/revocation, provider snapshots, notifications, HMAC webhooks, audit checkpoint, workspace isolation, restart persistence and encryption-key recovery passed.')
+            if formats:
+                helpers = runpy.run_path(str(ROOT / 'scripts/smoke-formats.py'))
+                profile = call('/admin/configuration')
+                configuration_values = {**profile['draft'], 'formats': list(helpers['FORMATS'].values())}
+                profile = call('/admin/configuration/draft', {'revision': profile['revision'], 'settings': configuration_values}, method='PUT')
+                call('/admin/configuration/draft/activate', {'revision': profile['revision']})
+                reviewed = call('/portal/configuration')
+                format_choice = call('/admin/signing-options/' + choice['id'], {'revision': choice['revision'], 'enabled': True}, method='PUT')
+                # Publish the expanded profile with the existing hardware identity, if present.
+                if softhsm_dir:
+                    identity_state = call('/admin/hardware-identities/' + hardware['id'] + '/approve', {
+                        'expectedProfileRevision': reviewed['activeRevision'], 'expectedIdentityFingerprint': format_choice['fingerprint'],
+                        'label': 'All-format hardware fixture', 'acknowledgePrivateTrust': True})
+                    format_choice = identity_state
+                else:
+                    format_choice = call('/admin/signing-options', {'label': 'All-format fixture', 'expectedProfileRevision': reviewed['activeRevision'], 'expectedIdentityFingerprint': reviewed['signingFingerprint'], 'acknowledgePublicClaims': True})
+                format_fields = {**fields, 'expectedProfileRevision': format_choice['profileRevision'], 'expectedIdentityFingerprint': format_choice['fingerprint'], 'signingOptionId': format_choice['id'], 'signingOptionRevision': format_choice['revision']}
+                folder = sandbox / 'formats'; folder.mkdir(); helpers['fixtures'](folder)
+                for extension, mime in helpers['FORMATS'].items():
+                    data, headers = multipart(format_fields, 'misleading.png', (folder / ('sample.' + extension)).read_bytes())
+                    result = call('/signing', data=data, extra=headers, raw=True)
+                    data, headers = multipart({}, 'misleading.png', result)
+                    report = call('/verification', data=data, extra=headers)
+                    assert report['validation_state'] == 'Valid', extension
+                    data, headers = multipart(format_fields, 'misleading.png', result)
+                    resigned = call('/signing', data=data, extra=headers, raw=True)
+                    data, headers = multipart({}, 'misleading.png', resigned)
+                    report = call('/verification', data=data, extra=headers)
+                    assert report['validation_state'] == 'Valid' and len(report['manifests']) >= 2, extension
+                    data, headers = multipart({}, 'misleading.png', helpers['tamper'](extension, result))
+                    assert call('/verification', data=data, extra=headers)['validation_state'] == 'Invalid', extension
+                    print(mime + ': signing, inspection, re-signing and tamper detection passed.', flush=True)
+            print(('PostgreSQL'  if postgres_bin else 'H2') + (': PKCS#11/non-exportable SoftHSM signing, ' if softhsm_dir else ': ') + ('RFC 3161 timestamps/snapshots, ' if timestamps else '') + 'worker resource limits/sandbox capability, private trust policy/snapshots, approved signing choices/rotation/withdrawal, MFA, one-time account recovery, migrations, leased native C2PA job, private storage, SigV4, scoped API-key signing/revocation, provider snapshots, notifications, HMAC webhooks, audit checkpoint, workspace isolation, restart persistence and encryption-key recovery passed.')
         finally:
             stop(); fixture.shutdown(); fixture.server_close()
             if tsa_server is not None: tsa_server.shutdown(); tsa_server.server_close()
@@ -550,5 +595,7 @@ if __name__ == '__main__':
     parser.add_argument('--postgres-bin', help='Directory containing initdb and postgres; creates a private temporary cluster')
     parser.add_argument('--softhsm-dir', help='Extracted SoftHSM/OpenSC prefix; uses only a disposable private test token')
     parser.add_argument('--timestamps', action='store_true', help='Test real RFC 3161 OpenSSL timestamps against a private disposable TSA')
+    parser.add_argument('--namespace', action='store_true', help='Require real network/filesystem namespace isolation for native signing and inspection')
+    parser.add_argument('--formats', action='store_true', help='Exercise all nine embedded formats, re-signing and tamper detection with the selected identity')
     args = parser.parse_args()
-    run(args.postgres_bin, args.softhsm_dir, args.timestamps)
+    run(args.postgres_bin, args.softhsm_dir, args.timestamps, args.namespace, args.formats)

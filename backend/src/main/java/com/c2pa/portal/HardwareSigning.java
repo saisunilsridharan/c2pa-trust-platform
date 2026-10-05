@@ -46,10 +46,10 @@ import java.util.concurrent.TimeUnit;
   try{
    Files.setPosixFilePermissions(scratch,java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
    String classpath=System.getProperty("java.class.path"),javaBinary=Path.of(System.getProperty("java.home"),"bin","java").toString();
-   List<String> command=new ArrayList<>(List.of(javaBinary,"-Djava.io.tmpdir="+scratch));
+   List<String> command=new ArrayList<>(List.of(javaBinary,"-Xmx128m","-XX:MaxMetaspaceSize=128m","-XX:MaxDirectMemorySize=32m","-Djava.io.tmpdir="+scratch));
    boolean packaged=classpath.endsWith(".jar") && !classpath.contains(System.getProperty("path.separator"));
    if(packaged)command.add("-Dloader.main=com.c2pa.portal.Pkcs11ToolMain");command.addAll(List.of("-cp",classpath,packaged?"org.springframework.boot.loader.launch.PropertiesLauncher":"com.c2pa.portal.Pkcs11ToolMain"));
-   process=new ProcessBuilder(command).redirectOutput(scratch.resolve("result.json").toFile()).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+   var child=new ProcessBuilder(command).redirectOutput(scratch.resolve("result.json").toFile()).redirectError(ProcessBuilder.Redirect.DISCARD);child.environment().clear();child.environment().put("PATH","/usr/bin:/bin");for(String name:List.of("SOFTHSM2_CONF","LD_LIBRARY_PATH")){String value=System.getenv(name);if(value!=null)child.environment().put(name,value);}process=child.start();
    try(var input=process.getOutputStream()){mapper.writeValue(input,Map.of("module",c.module(),"slotListIndex",c.slotListIndex(),"alias",c.keyAlias(),"pin",new String(pin,java.nio.charset.StandardCharsets.UTF_8),"data",Base64.getEncoder().encodeToString(data)));}
    if(!process.waitFor(15,TimeUnit.SECONDS) || process.exitValue()!=0 || Files.size(scratch.resolve("result.json"))>4096)throw new IllegalStateException();
    var result=mapper.readTree(Files.readAllBytes(scratch.resolve("result.json")));byte[] signature=Base64.getDecoder().decode(result.path("signature").asText());var verifier=Signature.getInstance("SHA256withECDSA");verifier.initVerify(chain.getFirst());verifier.update(data);if(!verifier.verify(signature))throw new IllegalStateException();return signature;

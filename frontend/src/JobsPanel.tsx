@@ -15,6 +15,9 @@ type Job = {
   attempts: number;
   error: string | null;
   createdAt: string;
+  sandboxMode: string;
+  maxMemoryMb: number;
+  maxCpuSeconds: number;
 };
 export default function JobsPanel({
   token,
@@ -298,6 +301,12 @@ export default function JobsPanel({
                 </td>
                 <td>
                   {job.state} · attempt {job.attempts}
+                  {admin && (
+                    <p>
+                      Execution: {job.sandboxMode} · {job.maxMemoryMb} MiB ·{" "}
+                      {job.maxCpuSeconds} CPU seconds.
+                    </p>
+                  )}
                   {job.error && <p>{job.error}</p>}
                   {job.state === "FAILED" && canSign && (
                     <button

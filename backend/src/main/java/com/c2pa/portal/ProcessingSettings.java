@@ -5,5 +5,8 @@ import jakarta.persistence.*;
  @Version public Long revision;
  public int workerTimeoutSeconds=45;
  public int maxAttempts=10;
+ @Column(nullable=false) public int maxMemoryMb=1024;
+ @Column(nullable=false) public int maxCpuSeconds=45;
+ @Column(nullable=false,length=32) public String sandboxMode="LIMITED";
  public ProcessingSettings(){}
 }

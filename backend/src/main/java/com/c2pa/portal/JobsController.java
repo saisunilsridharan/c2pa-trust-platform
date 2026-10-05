@@ -13,8 +13,8 @@ import java.util.*;
 public class JobsController {
  private final JobRepository jobs;private final JobService service;private final AuditService audit;
  public JobsController(JobRepository jobs,JobService service,AuditService audit){this.jobs=jobs;this.service=service;this.audit=audit;}
- public record Job(String id,String state,String title,String format,String owner,int attempts,String error,java.time.Instant createdAt){}
- private Job view(SigningJob j){return new Job(j.id,j.state,j.title,j.format,j.owner,j.attempts,j.error,j.createdAt);}
+ public record Job(String id,String state,String title,String format,String owner,int attempts,String error,java.time.Instant createdAt,String sandboxMode,int maxMemoryMb,int maxCpuSeconds){}
+ private Job view(SigningJob j){return new Job(j.id,j.state,j.title,j.format,j.owner,j.attempts,j.error,j.createdAt,j.sandboxMode,j.maxMemoryMb,j.maxCpuSeconds);}
  private SigningJob authorized(String id,HttpServletRequest request){var job=jobs.findById(id).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND));if(!job.workspaceId.equals(WorkspaceContext.id()) || (!request.getAttribute("portal.role").equals("ADMIN") && !job.owner.equals(request.getAttribute("portal.actor"))))throw new ResponseStatusException(HttpStatus.NOT_FOUND);return job;}
  @PostMapping(consumes="multipart/form-data") public Job submit(@RequestPart MultipartFile file,@RequestParam String creator,@RequestParam String title,@RequestParam String aiDisclosure,@RequestParam boolean acknowledgePublicClaims,@RequestHeader("Idempotency-Key") String key,@RequestParam Long expectedProfileRevision,@RequestParam String expectedIdentityFingerprint,@RequestParam(required=false) String signingOptionId,@RequestParam(required=false) Long signingOptionRevision,HttpServletRequest request)throws Exception{
   if(!acknowledgePublicClaims)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Review public claims first");

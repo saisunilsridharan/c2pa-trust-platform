@@ -17,11 +17,13 @@ public class DevelopmentIdentity {
  private final Path legacy;
  private final java.time.Clock clock;
  private boolean scopedRoot=false;private final Map<Long,DevelopmentIdentity> scopes=new HashMap<>();
+ private WorkerSandbox workerSandbox;
+ @org.springframework.beans.factory.annotation.Autowired void workerSandbox(WorkerSandbox sandbox){this.workerSandbox=sandbox;}
  public DevelopmentIdentity(){this(Path.of(".local"));scopedRoot=true;}
  DevelopmentIdentity(Path base){this(base,java.time.Clock.systemUTC());}
  DevelopmentIdentity(Path base,java.time.Clock clock,boolean scopedRoot){this(base,clock);this.scopedRoot=scopedRoot;}
  DevelopmentIdentity(Path base,java.time.Clock clock){this.clock=clock;storage=base.resolve("development-identities").toAbsolutePath();legacy=base.resolve("development-identity").toAbsolutePath();}
- private synchronized DevelopmentIdentity scoped(){Long id=WorkspaceContext.id();if(!scopedRoot || id.equals(1L))return this;return scopes.computeIfAbsent(id,i->new DevelopmentIdentity(storage.getParent().resolve("workspaces").resolve(i.toString()),clock));}
+ private synchronized DevelopmentIdentity scoped(){Long id=WorkspaceContext.id();if(!scopedRoot || id.equals(1L))return this;var scoped=scopes.computeIfAbsent(id,i->new DevelopmentIdentity(storage.getParent().resolve("workspaces").resolve(i.toString()),clock));scoped.workerSandbox=workerSandbox;return scoped;}
  public record Status(boolean configured,boolean available,String state,String provider,boolean productionTrusted,String fingerprint,Instant expiresAt) {}
  public record Material(Path certificate,Path key,String fingerprint,boolean development) { public Material(Path certificate,Path key,String fingerprint){this(certificate,key,fingerprint,true);} }
  private Path directory() throws Exception {
@@ -128,7 +130,13 @@ public class DevelopmentIdentity {
   finally{Files.deleteIfExists(pointer);}
  }
  private void execute(Path directory,String... command) throws Exception {
-  Process process=new ProcessBuilder(command).directory(directory.toFile()).redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+  ProcessBuilder builder;
+  if(command.length>1 && command[1].equals("sign")){
+   var arguments=new java.util.ArrayList<>(java.util.List.of(command));for(int i=2;i<arguments.size();i++)arguments.set(i,directory.resolve(arguments.get(i)).toAbsolutePath().toString());
+   var sandbox=workerSandbox==null?new WorkerSandbox(null):workerSandbox;
+   builder=sandbox.process(arguments,workerSandbox==null?new WorkerSandbox.Budget(1024,45,"LIMITED"):sandbox.current(WorkspaceContext.id()));
+  }else builder=new ProcessBuilder(command);
+  Process process=builder.directory(directory.toFile()).redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start();
   try {
    if(!process.waitFor(15,TimeUnit.SECONDS) || process.exitValue()!=0)throw new IllegalStateException("Development certificate generation failed");
   } finally {if(process.isAlive()){process.destroyForcibly();process.waitFor(5,TimeUnit.SECONDS);}}

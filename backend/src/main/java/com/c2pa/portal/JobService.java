@@ -44,7 +44,7 @@ public class JobService {
   Path directory=directory(job.id);Files.createDirectory(directory,java.nio.file.attribute.PosixFilePermissions.asFileAttribute(java.nio.file.attribute.PosixFilePermissions.fromString("rwx------")));
   try {
    job.trustSnapshot=trust.snapshot(job.workspaceId);job.timestampSnapshot=timestamps.snapshot(job.workspaceId);
-   processing.findById(job.workspaceId).ifPresent(p->{job.workerTimeoutSeconds=p.workerTimeoutSeconds;job.maxAttempts=p.maxAttempts;});
+   processing.findById(job.workspaceId).ifPresent(p->{job.workerTimeoutSeconds=p.workerTimeoutSeconds;job.maxAttempts=p.maxAttempts;job.maxMemoryMb=p.maxMemoryMb;job.maxCpuSeconds=p.maxCpuSeconds;job.sandboxMode=p.sandboxMode;});
    var activeStorage=retention.findById(job.workspaceId).map(s->s.activeVersion).orElse(null);
    if(activeStorage!=null)job.storageSnapshot=storageVersions.findById(activeStorage).filter(v->v.workspaceId.equals(job.workspaceId)).orElseThrow().configuration;
    file.transferTo(directory.resolve("original"+extension(job)));
@@ -65,7 +65,7 @@ public class JobService {
   try {
    Files.createDirectories(directory);Path output=directory.resolve("signed"+extension(job));
    Path worker=Path.of("../c2pa-worker/target/debug/c2pa-worker").toAbsolutePath().normalize();
-   int exit=execution.sign(job.workspaceId,worker,source.resolve("original"+extension(job)),output,source.resolve("manifest.json"),Path.of(job.certificatePath),job.keyPath,directory.resolve("report.json"),directory.resolve("worker-error.log"),job.workerTimeoutSeconds,job.trustSnapshot,job.timestampSnapshot);
+   int exit=execution.sign(job.workspaceId,worker,source.resolve("original"+extension(job)),output,source.resolve("manifest.json"),Path.of(job.certificatePath),job.keyPath,directory.resolve("report.json"),directory.resolve("worker-error.log"),job.workerTimeoutSeconds,job.trustSnapshot,job.timestampSnapshot,new WorkerSandbox.Budget(job.maxMemoryMb,job.maxCpuSeconds,job.sandboxMode));
    if(exit!=0 || !Files.isRegularFile(output))throw new IllegalStateException("Content or certificate could not be signed");
    objects.write(job,"signed"+extension(job),output);objects.write(job,"report.json",directory.resolve("report.json"));
    job.state="COMPLETED";job.error=null;

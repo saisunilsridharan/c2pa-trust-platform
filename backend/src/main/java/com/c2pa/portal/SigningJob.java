@@ -28,5 +28,8 @@ public class SigningJob {
  @Column(length=80000) public String trustSnapshot;
  @Column(length=80000) public String timestampSnapshot;
  @Column(nullable=false,columnDefinition="bigint default 1") public Long workspaceId=1L;
+ @Column(nullable=false) public int maxMemoryMb=1024;
+ @Column(nullable=false) public int maxCpuSeconds=45;
+ @Column(nullable=false,length=32) public String sandboxMode="LIMITED";
  public SigningJob(){}
 }
