@@ -1,3 +1,5 @@
+import CertificateRenewalPanel from "./CertificateRenewalPanel";
+import PrivateCaPanel from "./PrivateCaPanel";
 import { authenticationRetry } from "./authenticationRetry";
 import AuthenticationLimitsPanel from "./AuthenticationLimitsPanel";
 import AuditStoragePanel from "./AuditStoragePanel";
@@ -481,6 +483,8 @@ function App() {
                   <WebhooksPanel token={token} />
                   <ProcessingPanel token={token} />
                   <TimestampsPanel token={token} />
+                  <PrivateCaPanel token={token} />
+                  <CertificateRenewalPanel token={token} />
                   <AuditStoragePanel token={token} />
                   <TrustPolicyPanel token={token} />
                   <HardwareIdentitiesPanel

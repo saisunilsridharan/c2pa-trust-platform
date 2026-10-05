@@ -230,19 +230,22 @@ def initialize_token(command, environment, so_pin, user_pin):
 def chunk(kind, data):
     return struct.pack('!I', len(data)) + kind + data + struct.pack('!I', zlib.crc32(kind + data))
 
-def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, formats=False, audit_lock=False, certificates=False, rate_limits=False):
+def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, formats=False, audit_lock=False, certificates=False, rate_limits=False, private_ca=False):
     global LOCK_MODE
     global TSA_MODE
     assert (ROOT / 'backend/target/portal-api-0.1.0.jar').is_file(), 'Build the Java API first'
     assert (ROOT / 'c2pa-worker/target/debug/c2pa-worker').is_file(), 'Build the Rust worker first'
     with tempfile.TemporaryDirectory(prefix='c2pa-private-storage-') as temporary:
         sandbox = Path(temporary); backend = sandbox / 'backend'; backend.mkdir()
+        fixture_jar = sandbox / 'portal-api.jar'
+        shutil.copy2(ROOT / 'backend/target/portal-api-0.1.0.jar', fixture_jar)
         (sandbox / 'c2pa-worker').symlink_to(ROOT / 'c2pa-worker', target_is_directory=True)
         with socket.socket() as listener:
             listener.bind(('127.0.0.1', 0)); port = listener.getsockname()[1]
         base = f'http://127.0.0.1:{port}/api/v1'
         fixture = http.server.ThreadingHTTPServer(('127.0.0.1', 0), S3)
         threading.Thread(target=fixture.serve_forever, daemon=True).start()
+        ca_server, ca_anchor, ca_jwk, ca_modes = runpy.run_path(str(ROOT / 'scripts/private-ca-fixture.py'))['fixture'](sandbox / 'private-ca') if private_ca else (None, None, None, None)
         lock_server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), ObjectLock) if audit_lock else None
         if lock_server: threading.Thread(target=lock_server.serve_forever, daemon=True).start()
         tsa_server, tsa_anchor = timestamp_fixture(sandbox / "tsa") if timestamps else (None, None)
@@ -279,7 +282,7 @@ def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, 
             application_environment.update(DB_URL='jdbc:h2:file:./.local/portal', DB_USER='sa', DB_PASSWORD='')
         def start():
             nonlocal application
-            application = subprocess.Popen(['java', '-jar', str(ROOT / 'backend/target/portal-api-0.1.0.jar'),
+            application = subprocess.Popen(['java', '-jar', str(fixture_jar),
                                              f'--server.port={port}'], cwd=backend, stdout=log, stderr=log, env=application_environment)
             until = time.monotonic() + 60
             while time.monotonic() < until:
@@ -710,6 +713,80 @@ def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, 
                 stop(); start()
                 assert any(i['id'] == renewed['id'] and i['testedAt'] for i in call('/admin/hardware-identities'))
                 print('HSM certificate lifecycle: independently verified token-signed CSR, same-key renewed chain, rejection of mismatched/unchanged certificates, real C2PA signing, immutable old jobs and restart persistence passed.', flush=True)
+            if private_ca:
+                assert softhsm_dir, 'Private CA smoke requires --softhsm-dir'
+                ca_credential = call('/admin/credentials', {'label': 'Disposable CA provisioner JWK', 'value': json.dumps(ca_jwk)})['id']
+                ca_state = call('/admin/private-ca')
+                ca_configuration = {'enabled': True, 'endpoint': f'http://127.0.0.1:{ca_server.server_port}', 'provisioner': 'portal-c2pa', 'jwkCredential': ca_credential, 'tlsCaPem': '', 'issuanceAnchorsPem': ca_anchor, 'validityHours': 48, 'allowLoopbackHttp': True}
+                ca_state = call('/admin/private-ca/draft', {'revision': ca_state['revision'], 'configuration': ca_configuration}, method='PUT')
+                ca_selection = {'revision': ca_state['revision'], 'versionId': ca_state['draft']['id'], 'acknowledgePrivateIssuance': True}
+                ca_request = {**ca_selection, 'identityId': hardware['id'], 'expectedIdentityFingerprint': hardware['fingerprint'], 'subject': {'commonName': 'signer.portal.internal', 'organization': 'Private fixture', 'country': 'IN'}}
+                denied(lambda: call('/admin/private-ca/activate', ca_selection), 409)
+                denied(lambda: call('/admin/private-ca/test', {**ca_request, 'acknowledgePrivateIssuance': False}), 400)
+                denied(lambda: call('/admin/private-ca/test', ca_request, workspace=workspace), 404)
+                denied(lambda: call('/admin/private-ca/test', {**ca_request, 'expectedIdentityFingerprint': '0' * 64}), 409)
+                for mode in ['web_template', 'wrong_issuer', 'wrong_key', 'wrong_subject', 'wrong_san', 'oversize', 'redirect']:
+                    ca_modes['value'] = mode
+                    denied(lambda: call('/admin/private-ca/test', ca_request), 502)
+                    assert call('/admin/private-ca')['draft']['testedAt'] is None
+                ca_modes['value'] = 'valid'
+                ca_test = call('/admin/private-ca/test', ca_request)
+                assert ca_test['identity']['testedAt'] and ca_test['identity']['fingerprint'] != hardware['fingerprint']
+                ca_state = call('/admin/private-ca/activate', ca_selection)
+                # Credential references never expose the provisioner JWK through provider state/history.
+                assert ca_state['active']['configuration']['jwkCredential'] == ca_credential
+                ca_issue = call('/admin/private-ca/issue', {**ca_request, 'revision': ca_state['revision']})
+                assert ca_issue['identity']['id'] != ca_test['identity']['id'] and ca_issue['identity']['testedAt']
+                ca_choice = call('/admin/hardware-identities/' + ca_issue['identity']['id'] + '/approve', {'label': 'CA issued hardware identity', 'expectedProfileRevision': call('/portal/configuration')['activeRevision'], 'expectedIdentityFingerprint': ca_issue['identity']['fingerprint'], 'acknowledgePrivateTrust': True})
+                ca_fields = {**fields, 'expectedProfileRevision': ca_choice['profileRevision'], 'expectedIdentityFingerprint': ca_choice['fingerprint'], 'signingOptionId': ca_choice['id'], 'signingOptionRevision': ca_choice['revision']}
+                data, headers = multipart(ca_fields, 'issued.png', png)
+                ca_signed = call('/signing', data=data, extra=headers, raw=True)
+                data, headers = multipart({}, 'issued.png', ca_signed)
+                assert call('/verification', data=data, extra=headers)['validation_state'] == 'Valid'
+                assert call(f'/jobs/{job["id"]}/download', raw=True) == signed
+                renewal_request = {'providerVersion': ca_state['active']['id'], 'choiceId': ca_choice['id'], 'choiceRevision': ca_choice['revision'], 'subject': ca_request['subject'], 'renewBeforeHours': 6, 'acknowledgeAutomaticApproval': True}
+                denied(lambda: call('/admin/private-ca/renewals', {**renewal_request, 'acknowledgeAutomaticApproval': False}), 400)
+                plan = call('/admin/private-ca/renewals', renewal_request)
+                denied(lambda: call('/admin/private-ca/renewals', renewal_request), 409)
+                plan = next(p for p in call('/admin/private-ca/renewals') if p['id'] == plan['id'])
+                call('/admin/private-ca/renewals/' + plan['id'] + '/run', {'revision': plan['revision'], 'acknowledgeAutomaticApproval': True})
+                for _ in range(100):
+                    plan = next(p for p in call('/admin/private-ca/renewals') if p['id'] == plan['id'])
+                    if plan['lastRenewedAt']: break
+                    assert plan['state'] not in ('FAILED', 'BLOCKED', 'RETRY_WAIT'), 'Scheduled renewal failed'
+                    time.sleep(.2)
+                assert plan['lastRenewedAt'] and plan['currentChoiceId'] != ca_choice['id']
+                renewed_choice = next(c for c in call('/admin/signing-options') if c['id'] == plan['currentChoiceId'])
+                assert renewed_choice['enabled'] and renewed_choice['settings'] == ca_choice['settings']
+                assert not next(c for c in call('/admin/signing-options') if c['id'] == ca_choice['id'])['enabled']
+                renewed_fields = {**ca_fields, 'expectedIdentityFingerprint': renewed_choice['fingerprint'], 'signingOptionId': renewed_choice['id'], 'signingOptionRevision': renewed_choice['revision']}
+                data, headers = multipart(renewed_fields, 'renewed.png', png)
+                renewed_signed = call('/signing', data=data, extra=headers, raw=True)
+                data, headers = multipart({}, 'renewed.png', renewed_signed)
+                assert call('/verification', data=data, extra=headers)['validation_state'] == 'Valid'
+                paused = call('/admin/private-ca/renewals/' + plan['id'], {'revision': plan['revision'], 'enabled': False}, method='PUT')
+                denied(lambda: call('/admin/private-ca/renewals/' + plan['id'] + '/run', {'revision': paused['revision'], 'acknowledgeAutomaticApproval': True}), 409)
+                resumed = call('/admin/private-ca/renewals/' + plan['id'], {'revision': paused['revision'], 'enabled': True, 'choiceRevision': renewed_choice['revision'], 'acknowledgeAutomaticApproval': True}, method='PUT')
+                ca_modes['delaySeconds'] = 2
+                call('/admin/private-ca/renewals/' + plan['id'] + '/run', {'revision': resumed['revision'], 'acknowledgeAutomaticApproval': True})
+                running = next(p for p in call('/admin/private-ca/renewals') if p['id'] == plan['id'])
+                denied(lambda: call('/admin/private-ca/renewals/' + plan['id'] + '/run', {'revision': running['revision'], 'acknowledgeAutomaticApproval': True}), 409)
+                paused = call('/admin/private-ca/renewals/' + plan['id'], {'revision': running['revision'], 'enabled': False}, method='PUT')
+                time.sleep(4)
+                ca_modes['delaySeconds'] = 0
+                after_pause = next(p for p in call('/admin/private-ca/renewals') if p['id'] == plan['id'])
+                assert after_pause['state'] == 'PAUSED' and after_pause['currentChoiceId'] == renewed_choice['id']
+                assert next(c for c in call('/admin/signing-options') if c['id'] == renewed_choice['id'])['enabled']
+                assert call(f'/jobs/{job["id"]}/download', raw=True) == signed
+                stop(); start()
+                assert next(p for p in call('/admin/private-ca/renewals') if p['id'] == plan['id'])['state'] == 'PAUSED'
+                assert call('/admin/private-ca')['active']['id'] == ca_state['active']['id']
+                assert call('/admin/private-ca/history')[0]['testedAt']
+                ca_state = call('/admin/private-ca/draft', {'revision': ca_state['revision'], 'configuration': {'enabled': False}}, method='PUT')
+                disabled = {'revision': ca_state['revision'], 'versionId': ca_state['draft']['id'], 'acknowledgePrivateIssuance': True}
+                call('/admin/private-ca/test', disabled); call('/admin/private-ca/activate', disabled)
+                denied(lambda: call('/admin/private-ca/issue', {**ca_request, 'revision': call('/admin/private-ca')['revision']}), 409)
+                print('Private CA: independently verified ES256 one-time provisioner tokens and CSR binding, pinned issuance trust, incorrect template/key/subject/SAN/CA rejection, bounded/no-redirect transport, real HSM certificate issuance/signing, scheduled same-key replacement/profile preservation, paused in-flight publication rejection, disabled provider, workspace isolation and restart persistence passed.', flush=True)
             if formats:
                 helpers = runpy.run_path(str(ROOT / 'scripts/smoke-formats.py'))
                 profile = call('/admin/configuration')
@@ -745,6 +822,7 @@ def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, 
             print(('PostgreSQL'  if postgres_bin else 'H2') + (': PKCS#11/non-exportable SoftHSM signing, ' if softhsm_dir else ': ') + ('RFC 3161 timestamps/snapshots, ' if timestamps else '') + 'worker resource limits/sandbox capability, private trust policy/snapshots, approved signing choices/rotation/withdrawal, MFA, one-time account recovery, migrations, leased native C2PA job, private storage, SigV4, scoped API-key signing/revocation, provider snapshots, notifications, HMAC webhooks, audit checkpoint, workspace isolation, restart persistence and encryption-key recovery passed.')
         finally:
             stop(); fixture.shutdown(); fixture.server_close()
+            if ca_server is not None: ca_server.shutdown(); ca_server.server_close()
             if lock_server is not None: lock_server.shutdown(); lock_server.server_close()
             if tsa_server is not None: tsa_server.shutdown(); tsa_server.server_close()
             if postgres is not None:
@@ -762,5 +840,6 @@ if __name__ == '__main__':
     parser.add_argument('--audit-lock', action='store_true', help='Test protected audit checkpoint storage with an independent S3 Object Lock protocol fixture')
     parser.add_argument('--certificates', action='store_true', help='Test token-signed CSR and immutable certificate renewal with an independent OpenSSL private CA')
     parser.add_argument('--rate-limits', action='store_true', help='Verify UI-configured shared authentication throttling and trusted-proxy policy')
+    parser.add_argument('--private-ca', action='store_true', help='Verify connected Smallstep-compatible private CA issuance with an independent OpenSSL protocol fixture')
     args = parser.parse_args()
-    run(args.postgres_bin, args.softhsm_dir, args.timestamps, args.namespace, args.formats, args.audit_lock, args.certificates, args.rate_limits)
+    run(args.postgres_bin, args.softhsm_dir, args.timestamps, args.namespace, args.formats, args.audit_lock, args.certificates, args.rate_limits, args.private_ca)
