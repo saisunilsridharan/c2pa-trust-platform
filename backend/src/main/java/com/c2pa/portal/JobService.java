@@ -31,8 +31,7 @@ public class JobService {
   var settings=mapper.readValue(record.active,ConfigurationController.Settings.class);
   if(settings.requireAiDisclosure() && ai.equals("unspecified"))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"AI declaration required");
   if(file.isEmpty() || file.getSize()>settings.maxUploadMb()*1024L*1024)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"File exceeds profile limits");
-  byte[] header;try(var stream=file.getInputStream()){header=stream.readNBytes(8);}
-  String format=header.length>=3 && (header[0]&255)==255 && (header[1]&255)==216 && (header[2]&255)==255?"image/jpeg":Arrays.equals(header,new byte[]{(byte)137,80,78,71,13,10,26,10})?"image/png":null;
+  String format=ContentFormats.detect(file);
   if(format==null || !settings.formats().contains(format))throw new ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE,"Unsupported or disabled format");
   var material=identity.material();if(!Objects.equals(expectedProfileRevision,record.activeRevision==null?record.revision:record.activeRevision) || !Objects.equals(expectedIdentityFingerprint,material.fingerprint()))throw new ResponseStatusException(HttpStatus.CONFLICT,"Profile or identity changed; reload and review public claims again");SigningJob job=new SigningJob();job.id=UUID.randomUUID().toString();job.owner=owner;job.requestKey=requestKey;job.requestDigest=requestDigest;job.state="QUEUED";job.format=format;job.title=title;job.fingerprint=material.fingerprint();job.certificatePath=material.certificate().toString();job.keyPath=material.key().toString();job.createdAt=Instant.now();
   Files.createDirectories(storage);Files.setPosixFilePermissions(storage,java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
@@ -44,7 +43,7 @@ public class JobService {
    return jobs.saveAndFlush(job);
   } catch(Exception e){try(var paths=Files.list(directory)){for(Path p:paths.toList())Files.deleteIfExists(p);}Files.delete(directory);throw e;}
  }
- public String extension(SigningJob job){return job.format.equals("image/png")?".png":".jpg";}
+ public String extension(SigningJob job){return ContentFormats.extension(job.format);}
  @EventListener(ApplicationReadyEvent.class) public void recover(){for(var job:jobs.findByStateOrderByCreatedAtAsc("RUNNING",PageRequest.of(0,10000))){job.state="QUEUED";jobs.save(job);}}
  @Scheduled(cron="${portal.jobs.schedule:*/1 * * * * *}") public void process() {
   var pending=jobs.findByStateOrderByCreatedAtAsc("QUEUED",PageRequest.of(0,1));if(pending.isEmpty())return;

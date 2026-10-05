@@ -14,7 +14,7 @@ The implemented persistent queue invokes one bounded local Rust process at a tim
 
 ## Completed development signing slice
 
-UI-created development identities, reviewed user declarations, JPEG/PNG signed downloads, post-sign validation, original ingredient retention, and tampering checks are implemented. Configuration history/rollback, audit records, and development certificate status/rotation are implemented. Batch jobs, original/signed assets, downloadable validation reports, per-user job access, manual retries, startup recovery, UI retention, and operations diagnostics are implemented for a single local instance. UI PKCS#12 private identity import includes chain/key checks and a real Rust signing probe. Public certificate trust, trusted timestamps, encrypted storage, and hardware key providers remain outstanding.
+UI-created development identities, reviewed user declarations, image/audio/video/PDF signed downloads, post-sign validation, original ingredient retention, and tampering checks are implemented. Configuration history/rollback, audit records, and development certificate status/rotation are implemented. Batch jobs, original/signed assets, downloadable validation reports, per-user job access, manual retries, startup recovery, UI retention, and operations diagnostics are implemented for a single local instance. UI PKCS#12 private identity import includes chain/key checks and a real Rust signing probe. Public certificate trust, trusted timestamps, encrypted storage, and hardware key providers remain outstanding.
 
 ## Next: production signing vertical slice
 
@@ -24,7 +24,7 @@ UI-created development identities, reviewed user declarations, JPEG/PNG signed d
 4. Add KMS/HSM providers and production certificate lifecycle. Development expiry status and UI rotation are implemented.
 5. Extend the implemented Rust signing and inspection with isolated queued workers, timestamping, and production trust policy.
 6. Persistent jobs and polling progress are implemented; next add distributed workers, notifications, and webhook integrations.
-7. Validate JPEG and PNG signing, tampering detection, provenance preservation, and independent-verifier compatibility.
+7. JPEG, PNG, WebP, TIFF, WAV, MP3, FLAC, MP4, and PDF pass real signing, inspection, re-signing and tamper checks. Expand representative fixtures and independent-verifier compatibility testing.
 
 ## Administration expansion
 

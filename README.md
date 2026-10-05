@@ -6,12 +6,12 @@ React + TypeScript portal, Java 21 Spring Boot API with Swagger UI, and a Rust w
 
 - Initial administrator enrollment, named-account login, and administrator/signer/viewer permissions.
 - Local account recovery with forced temporary-password replacement and administrator session revocation.
-- UI-managed organization name, signing profile, JPEG/PNG selection, upload limit, and AI disclosure requirement.
+- UI-managed organization name, signing profile, supported-format selection, upload limit, and AI disclosure requirement.
 - Persistent configuration drafts and active configuration, with optimistic revision checks.
 - Schema validation before profile activation; activation does **not** enable signing.
-- Multipart JPEG/PNG provenance inspection through Java and the Rust SDK. Reports contain validation details; a readable manifest is not proof of trusted content.
+- Multipart image/audio/video/PDF provenance inspection through Java and the Rust SDK. Reports contain validation details; a readable manifest is not proof of trusted content.
 - UI-created development signing identity with owner-only private-key storage; explicit development-only acknowledgment.
-- JPEG/PNG signing with reviewed public creator/title/AI declarations, signed download, validation, and existing provenance preservation.
+- Image/audio/video/PDF signing with reviewed public creator/title/AI declarations, signed download, validation, and existing provenance preservation.
 - UI development certificate status, expiry checks, and rotation.
 - Configuration history, revision-protected rollback, and paginated audit records.
 - Persistent single-instance signing jobs, batch upload, manual retry, and startup recovery.
@@ -52,7 +52,7 @@ npm run dev
 
 The backend generates `backend/.local/admin-token` with owner-only permissions. Retrieve this local bootstrap credential securely and enter it on the portal's Connect screen. Do not commit or share it. It is authentication, not an application setting. Tokens stay in browser memory and are cleared by Disconnect. The API and development portal bind to loopback by default; this foundation must not be exposed publicly.
 
-Select settings, save the draft, validate it, then activate. In the signing panel, acknowledge development-only use and create an identity. Upload a JPEG or PNG, enter a title and creator attribution, select an AI declaration, review the public claims, and sign/download. Inspect the downloaded file in the verification panel. Development certificates expire after 30 days, are not trusted by public trust lists, and use no trusted timestamp. Existing provenance and its metadata are retained as a parent ingredient. Upload a JPEG or PNG containing an embedded C2PA manifest to inspect it. Unsigned or malformed content returns HTTP 422 rather than a false success result.
+Select settings, save the draft, validate it, then activate. In the signing panel, acknowledge development-only use and create an identity. Upload a supported content file, enter a title and creator attribution, select an AI declaration, review the public claims, and sign/download. Inspect the downloaded file in the verification panel. Development certificates expire after 30 days, are not trusted by public trust lists, and use no trusted timestamp. Existing provenance and its metadata are retained as a parent ingredient. Upload supported content containing an embedded C2PA manifest to inspect it. Unsigned or malformed content returns HTTP 422 rather than a false success result.
 
 Swagger UI is served at `/swagger-ui/index.html` on the Java service; OpenAPI is at `/v3/api-docs`. The Vite development server proxies both paths and `/api`. Use `X-Admin-Token` in Swagger's Authorize dialog. Documentation is accessible locally without a token; administration and inspection require one.
 
@@ -108,3 +108,11 @@ Administration & recovery accepts a password-protected PKCS#12 bundle (up to 1 M
 Run `python scripts/smoke-jobs.py` against the running backend before enrollment to check real queue processing, idempotency, conflicting claims, stored downloads/reports, and verification. It retains one generated test asset. After enrollment, adapt the internal smoke helper to use an authorized session without printing it. A signed output passing integrity checks must still be evaluated independently for signer trust.
 
 Administrators can reset another local account through Users and permissions. A reset revokes all sessions, clears the account lockout, and marks the account as requiring a password change. The user signs in with the temporary password and can only read their account, change their password, or sign out until choosing a different password. Share temporary passwords through your secure channel; the portal does not send them. Administrators use the ordinary password-change screen for their own account. Active-session counts and Sign out all sessions are also available in the UI; revoking your own sessions requires signing in again.
+
+## Content format capabilities
+
+The portal supports signing and inspection of JPEG, PNG, WebP, TIFF, WAV, MP3, FLAC, MP4, and PDF. Administrators enable formats through profile settings; existing profiles retain their selected formats until edited. `/api/v1/portal/capabilities` provides MIME types, labels, and download extensions. Upload detection uses file bytes, disregarding the supplied filename and MIME type. MP4 currently accepts tested MP4 brands; HEIC, QuickTime, and audio-only M4A are not automatically treated as MP4 video.
+
+The Rust worker includes the SDK's PDF feature. Basic generated PDF signing, inspection, re-signing and tamper checks pass; encrypted PDFs and existing digital signatures need separate compatibility evaluation. Arbitrary files do not automatically support embedded C2PA credentials. Format parsers still reject malformed or unsupported variants.
+
+For a repeatable multi-format check, enable the nine formats through the UI and run `python scripts/smoke-formats.py`. It generates small fixtures using FFmpeg (a test-only dependency), checks signing, inspection, retained provenance and altered-content detection, and deletes temporary fixtures. A dedicated in-memory database was used for implementation checks so the real active profile was preserved.

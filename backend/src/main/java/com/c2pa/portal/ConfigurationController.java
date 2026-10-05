@@ -13,7 +13,7 @@ import java.util.*;
 public class ConfigurationController {
  public record Settings(@NotBlank @Size(max=120) String organizationName,
    @NotBlank @Size(max=120) String profileName,
-   @NotEmpty Set<@NotNull @Pattern(regexp="image/jpeg|image/png") String> formats,
+   @NotEmpty Set<@NotNull @Pattern(regexp="image/jpeg|image/png|image/webp|image/tiff|audio/wav|audio/mpeg|audio/flac|video/mp4|application/pdf") String> formats,
    @Min(1) @Max(100) int maxUploadMb, boolean requireAiDisclosure) {}
  public record Update(@NotNull @Valid Settings settings, @NotNull Long revision) {}
  public record State(Settings draft, Settings active, Long revision, boolean signingAvailable, Long activeRevision, String signingFingerprint) {}
@@ -38,6 +38,8 @@ public class ConfigurationController {
  @SecurityRequirement(name="adminToken")
  @GetMapping("/portal/configuration") @Transactional
  public State publicConfiguration(){ConfigurationRecord r=record();return new State(null,decode(r.active),r.revision,identity.available(),r.activeRevision,identity.status().fingerprint());}
+ @SecurityRequirement(name="adminToken")
+ @GetMapping("/portal/capabilities") public Map<String,Object> capabilities(){return Map.of("sdk","c2pa-rs 0.91.1","formats",ContentFormats.SUPPORTED,"arbitraryFiles",false);}
  @GetMapping("/health") public Map<String,String> health(){return Map.of("status","UP");}
  @GetMapping("/admin/configuration") @SecurityRequirement(name="adminToken") @Transactional
  public State get(){return state(record());}

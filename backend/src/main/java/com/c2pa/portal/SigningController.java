@@ -45,15 +45,14 @@ public class SigningController {
   var settings=mapper.readValue(record.active,ConfigurationController.Settings.class);
   if(settings.requireAiDisclosure() && aiDisclosure.equals("unspecified"))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"AI disclosure is required by the active profile");
   if(file.isEmpty() || file.getSize()>settings.maxUploadMb()*1024L*1024)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"File is empty or exceeds profile limits");
-  byte[] header;try(var stream=file.getInputStream()){header=stream.readNBytes(8);}
-  String format=header.length>=3 && (header[0]&255)==255 && (header[1]&255)==216 && (header[2]&255)==255?"image/jpeg":Arrays.equals(header,new byte[]{(byte)137,80,78,71,13,10,26,10})?"image/png":null;
+  String format=ContentFormats.detect(file);
   if(format==null || !settings.formats().contains(format))throw new ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE,"Unsupported or disabled content format");
   Path worker=Path.of("../c2pa-worker/target/debug/c2pa-worker").toAbsolutePath().normalize();
   if(!Files.isExecutable(worker))throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Build the Rust worker first");
   DevelopmentIdentity.Material material=identity.material();
   Path directory=Files.createTempDirectory("c2pa-signing-");Process process=null;
   try {
-   String extension=format.equals("image/png")?".png":".jpg";
+   String extension=ContentFormats.extension(format);
    Path input=directory.resolve("original"+extension),output=directory.resolve("signed"+extension),manifest=directory.resolve("manifest.json");file.transferTo(input);
    var declarations=Map.of("creator",creator,"organization",settings.organizationName(),"profile",settings.profileName(),"configurationRevision",record.activeRevision==null?record.revision:record.activeRevision,"aiDisclosure",aiDisclosure,"source","user-declared","developmentIdentity",material.development());
    var definition=Map.of("claim_generator_info",List.of(Map.of("name","C2PA Trust Portal","version","0.2.0")),"title",title,"format",format,"assertions",List.of(Map.of("label","com.c2pa.portal.declarations","data",declarations)));

@@ -15,10 +15,17 @@ fn execute() -> Result<(), Box<dyn std::error::Error>> {
         let mut builder = c2pa::Builder::from_context(c2pa::Context::new())
             .with_definition(definition.as_str())?;
         builder.set_intent(c2pa::BuilderIntent::Edit);
-        let format = if args[1].ends_with(".png") {
-            "image/png"
-        } else {
-            "image/jpeg"
+        let format = match std::path::Path::new(&args[1]).extension().and_then(|e| e.to_str()) {
+            Some("png") => "image/png",
+            Some("jpg" | "jpeg") => "image/jpeg",
+            Some("webp") => "image/webp",
+            Some("tif" | "tiff") => "image/tiff",
+            Some("wav") => "audio/wav",
+            Some("mp3") => "audio/mpeg",
+            Some("flac") => "audio/flac",
+            Some("mp4") => "video/mp4",
+            Some("pdf") => "application/pdf",
+            _ => return Err("Unsupported input extension".into()),
         };
         let mut original = std::fs::File::open(&args[1])?;
         builder.add_ingredient_from_stream(

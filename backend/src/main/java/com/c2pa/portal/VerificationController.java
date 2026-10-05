@@ -28,10 +28,7 @@ public class VerificationController {
   var settings=mapper.readValue(record.active,ConfigurationController.Settings.class);
   if(file.isEmpty() || file.getSize()>settings.maxUploadMb()*1024L*1024)
    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"File exceeds profile limits or is empty");
-  byte[] header;
-  try(var stream=file.getInputStream()){header=stream.readNBytes(8);}
-  String format=header.length>=3 && (header[0]&255)==255 && (header[1]&255)==216 && (header[2]&255)==255?"image/jpeg":
-   java.util.Arrays.equals(header,new byte[]{(byte)137,80,78,71,13,10,26,10})?"image/png":null;
+  String format=ContentFormats.detect(file);
   if(format==null || !settings.formats().contains(format))
    throw new ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE,"Unsupported or disabled format");
   Path worker=Path.of("../c2pa-worker/target/debug/c2pa-worker").toAbsolutePath().normalize();
@@ -39,7 +36,7 @@ public class VerificationController {
   Path directory=Files.createTempDirectory("c2pa-inspection-");
   Process process=null;
   try {
-   Path input=directory.resolve(format.equals("image/png")?"asset.png":"asset.jpg");
+   Path input=directory.resolve("asset"+ContentFormats.extension(format));
    file.transferTo(input);
    Path output=directory.resolve("report.json");
    process=new ProcessBuilder(worker.toString(),input.toString())

@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 type Props = {
   token: string;
+  capabilities: { mime: string; extension: string }[];
   active: {
     organizationName: string;
     profileName: string;
     requireAiDisclosure: boolean;
+    formats: string[];
   } | null;
   available: boolean;
   canConfigure: boolean;
@@ -12,6 +14,7 @@ type Props = {
 };
 export default function SigningPanel({
   token,
+  capabilities,
   canConfigure,
   onConfigured,
   active,
@@ -102,7 +105,7 @@ export default function SigningPanel({
         Content file
         <input
           type="file"
-          accept="image/jpeg,image/png"
+          accept={active?.formats.join(",")}
           onChange={(e) => {
             setFile(e.target.files?.[0] ?? null);
             setReviewed(false);
@@ -193,11 +196,10 @@ export default function SigningPanel({
             const url = URL.createObjectURL(await response.blob());
             const link = document.createElement("a");
             link.href = url;
-            link.download = response.headers
-              .get("Content-Type")
-              ?.includes("png")
-              ? "signed-content.png"
-              : "signed-content.jpg";
+            const mime = response.headers.get("Content-Type")?.split(";")[0];
+            link.download =
+              "signed-content" +
+              (capabilities.find((c) => c.mime === mime)?.extension || ".bin");
             link.click();
             setTimeout(() => URL.revokeObjectURL(url), 1000);
             setMessage(

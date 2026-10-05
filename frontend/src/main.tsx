@@ -6,6 +6,13 @@ import AdministrationPanel from "./AdministrationPanel";
 import UsersPanel from "./UsersPanel";
 import PasswordPanel from "./PasswordPanel";
 import JobsPanel from "./JobsPanel";
+type Capability = {
+  mime: string;
+  label: string;
+  extension: string;
+  signing: boolean;
+  inspection: boolean;
+};
 type Settings = {
   organizationName: string;
   profileName: string;
@@ -22,6 +29,7 @@ type State = {
   signingFingerprint: string | null;
 };
 function App() {
+  const [capabilities, setCapabilities] = useState<Capability[]>([]);
   const [user, setUser] = useState<{
     id: number | null;
     username: string;
@@ -61,6 +69,11 @@ function App() {
     );
     if (!config.ok) throw new Error("Could not load portal settings.");
     const next = await config.json();
+    const caps = await fetch("/api/v1/portal/capabilities", {
+      headers: { "X-Admin-Token": sessionToken },
+    });
+    if (!caps.ok) throw new Error("Could not load supported formats.");
+    setCapabilities((await caps.json()).formats);
     setToken(sessionToken);
     setUser(account);
     setState(next);
@@ -280,28 +293,28 @@ function App() {
                       />
                     </label>
                     <fieldset>
-                      <legend>Planned content formats</legend>
-                      {["image/jpeg", "image/png"].map((format) => (
-                        <label className="check" key={format}>
-                          <input
-                            type="checkbox"
-                            checked={settings.formats.includes(format)}
-                            onChange={(e) =>
-                              change({
-                                ...settings,
-                                formats: e.target.checked
-                                  ? [...settings.formats, format]
-                                  : settings.formats.filter(
-                                      (f) => f !== format,
-                                    ),
-                              })
-                            }
-                          />
-                          {format === "image/jpeg"
-                            ? "JPEG images"
-                            : "PNG images"}
-                        </label>
-                      ))}
+                      <legend>Supported content formats</legend>
+                      {capabilities
+                        .filter((c) => c.signing)
+                        .map(({ mime: format, label }) => (
+                          <label className="check" key={format}>
+                            <input
+                              type="checkbox"
+                              checked={settings.formats.includes(format)}
+                              onChange={(e) =>
+                                change({
+                                  ...settings,
+                                  formats: e.target.checked
+                                    ? [...settings.formats, format]
+                                    : settings.formats.filter(
+                                        (f) => f !== format,
+                                      ),
+                                })
+                              }
+                            />
+                            {label}
+                          </label>
+                        ))}
                     </fieldset>
                     <label>
                       Maximum upload size (MB)
@@ -401,6 +414,7 @@ function App() {
               {user?.role !== "VIEWER" && (
                 <SigningPanel
                   token={token}
+                  capabilities={capabilities}
                   active={state.active}
                   canConfigure={user?.role === "ADMIN"}
                   available={state.signingAvailable}
@@ -412,13 +426,14 @@ function App() {
                 canSign={user?.role !== "VIEWER"}
                 admin={user?.role === "ADMIN"}
                 activeProfile={state.active}
+                capabilities={capabilities}
                 profileRevision={state.activeRevision}
                 signingFingerprint={state.signingFingerprint}
               />
               <section>
                 <h2>Inspect content credentials</h2>
                 <p>
-                  Upload a JPEG or PNG with an embedded C2PA manifest.
+                  Upload supported content with an embedded C2PA manifest.
                   Cryptographic integrity and signer trust are separate results;
                   inspect the reported validation statuses.
                 </p>
@@ -426,7 +441,10 @@ function App() {
                   Content file
                   <input
                     type="file"
-                    accept="image/jpeg,image/png"
+                    accept={capabilities
+                      .filter((c) => c.inspection)
+                      .map((c) => c.mime)
+                      .join(",")}
                     onChange={(e) => {
                       setFile(e.target.files?.[0] ?? null);
                       setReport(null);

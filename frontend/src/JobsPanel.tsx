@@ -13,14 +13,20 @@ export default function JobsPanel({
   token,
   canSign,
   admin,
+  capabilities,
   activeProfile,
   profileRevision,
   signingFingerprint,
 }: {
   token: string;
+  capabilities: { mime: string; extension: string }[];
   canSign: boolean;
   admin: boolean;
-  activeProfile: { organizationName: string; profileName: string } | null;
+  activeProfile: {
+    organizationName: string;
+    profileName: string;
+    formats: string[];
+  } | null;
   profileRevision: number | null;
   signingFingerprint: string | null;
 }) {
@@ -131,7 +137,7 @@ export default function JobsPanel({
             <input
               type="file"
               multiple
-              accept="image/jpeg,image/png"
+              accept={activeProfile?.formats.join(",")}
               onChange={(e) => {
                 setFiles(Array.from(e.target.files ?? []));
                 setReviewed(false);
@@ -310,9 +316,8 @@ export default function JobsPanel({
                             version +
                             (version === "report"
                               ? ".json"
-                              : job.format === "image/png"
-                                ? ".png"
-                                : ".jpg");
+                              : capabilities.find((c) => c.mime === job.format)
+                                  ?.extension || ".bin");
                           link.click();
                           setTimeout(() => URL.revokeObjectURL(url), 1000);
                         })
