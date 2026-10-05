@@ -13,12 +13,12 @@ import java.util.*;
 public class AccountsController {
  private final AccountService accounts;private final UserRepository users;private final SessionRepository sessions;private final AuditService audit;private final WorkspaceService workspaces;
  public AccountsController(AccountService accounts,UserRepository users,SessionRepository sessions,AuditService audit,WorkspaceService workspaces){this.accounts=accounts;this.users=users;this.sessions=sessions;this.audit=audit;this.workspaces=workspaces;}
- public record Credentials(@NotBlank @Size(max=40) String username,String password){}
+ public record Credentials(@NotBlank @Size(max=40) String username,String password,@Size(max=64) String code){}
  public record NewUser(@NotBlank String username,String password,@Pattern(regexp="ADMIN|SIGNER|VIEWER") @NotNull String role){}
  public record Access(@Pattern(regexp="ADMIN|SIGNER|VIEWER") @NotNull String role,boolean enabled){}
  @GetMapping("/auth/status") public Map<String,Boolean> status(){return Map.of("enrolled",accounts.enrolled());}
  @PostMapping("/auth/login") public AccountService.Login login(@Valid @RequestBody Credentials credentials,HttpServletRequest request){
-  var result=accounts.login(credentials.username(),credentials.password());
+  var result=accounts.login(credentials.username(),credentials.password(),credentials.code());
   if(result==null)throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Invalid credentials or temporarily locked account");
   try{request.setAttribute("portal.workspaceId",workspaces.select(users.findById(result.user().id()).orElseThrow(),null).id());}catch(ResponseStatusException e){request.setAttribute("portal.workspaceId",0L);}
   request.setAttribute("portal.actor",result.user().username());audit.record("USER_LOGIN",String.valueOf(result.user().id()));return result;

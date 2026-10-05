@@ -4,5 +4,6 @@ import org.springframework.data.domain.Pageable;
 import java.util.*;
 public interface CredentialRepository extends JpaRepository<EncryptedCredential,String>{
  List<EncryptedCredential> findByWorkspaceIdOrderByCreatedAtDesc(Long workspaceId,Pageable page);
+ List<EncryptedCredential> findByWorkspaceIdAndKindOrderByCreatedAtDesc(Long workspaceId,String kind,Pageable page);
  @Query("select distinct c.keyFingerprint from EncryptedCredential c") List<String> fingerprints();
 }

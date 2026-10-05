@@ -9,5 +9,6 @@ public class EncryptedCredential {
  @Column(nullable=false,length=64000) public String sealed;
  @Column(nullable=false,length=64) public String keyFingerprint;
  public Instant createdAt;
+ @Column(nullable=false,length=32,columnDefinition="varchar(32) default 'INTEGRATION'") public String kind="INTEGRATION";
  public EncryptedCredential(){}
 }

@@ -2,6 +2,7 @@
 The local fixture verifies AWS SigV4; it is not a MinIO compatibility certification.
 """
 import hashlib
+import base64
 import hmac
 import http.server
 import json
@@ -262,6 +263,26 @@ def run(postgres_bin=None):
             call('/admin/storage/providers/activate', selection)
             shutil.rmtree(backend / '.local/assets' / job['id'])
             assert call(f'/jobs/{job["id"]}/download', raw=True) == signed
+            # Self-service recovery and MFA use real encrypted, purpose-bound secrets.
+            recovery_key = call('/auth/recovery-key', {'password': password})['recoveryKey']
+            enrollment = call('/auth/mfa/enroll', {'password': password})
+            totp_secret = base64.b32decode(enrollment['secret'])
+            mac = hmac.new(totp_secret, struct.pack('!Q', int(time.time()) // 30), hashlib.sha1).digest()
+            offset = mac[-1] & 15
+            otp = f'{(struct.unpack("!I", mac[offset:offset + 4])[0] & 0x7fffffff) % 1000000:06d}'
+            backup_codes = call('/auth/mfa/confirm', {'password': password, 'code': otp})['recoveryCodes']
+            denied(lambda: call('/jobs'), 401)
+            denied(lambda: call('/auth/login', {'username': 'storage-admin', 'password': password}), 401)
+            token = call('/auth/login', {'username': 'storage-admin', 'password': password, 'code': backup_codes[0]})['token']
+            assert call('/auth/mfa')['enabled']
+            next_password = secrets.token_urlsafe(24)
+            call('/auth/recovery', {'username': 'storage-admin', 'recoveryKey': recovery_key,
+                                    'newPassword': next_password, 'code': backup_codes[1]})
+            denied(lambda: call('/jobs'), 401)
+            token = call('/auth/login', {'username': 'storage-admin', 'password': next_password, 'code': backup_codes[2]})['token']
+            assert call('/auth/mfa')['recoveryCodesRemaining'] == 5
+            assert not call('/auth/mfa')['accountRecoveryConfigured']
+            assert call(f'/jobs/{job["id"]}/download', raw=True) == signed
             stop(); start()
             assert call(f'/jobs/{job["id"]}/download', raw=True) == signed
             assert call('/admin/security')['available']
@@ -276,7 +297,7 @@ def run(postgres_bin=None):
             data, headers = multipart({'password': backup_password, 'acknowledgeRestore': 'true'}, 'key.backup', backup)
             assert call('/admin/security/restore', data=data, extra=headers)['available']
             assert call(f'/jobs/{job["id"]}/download', raw=True) == signed
-            print(('PostgreSQL' if postgres_bin else 'H2') + ': migrations, leased native C2PA job, private storage, SigV4, scoped API-key signing/revocation, provider snapshots, notifications, HMAC webhooks, audit checkpoint, workspace isolation, restart persistence and encryption-key recovery passed.')
+            print(('PostgreSQL' if postgres_bin else 'H2') + ': MFA, one-time account recovery, migrations, leased native C2PA job, private storage, SigV4, scoped API-key signing/revocation, provider snapshots, notifications, HMAC webhooks, audit checkpoint, workspace isolation, restart persistence and encryption-key recovery passed.')
         finally:
             stop(); fixture.shutdown(); fixture.server_close()
             if postgres is not None:

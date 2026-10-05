@@ -14,7 +14,8 @@ public class AccountService {
  private final BCryptPasswordEncoder encoder=new BCryptPasswordEncoder(12);
  private final String dummy=encoder.encode("unused-account-password");
  private final ApiKeyRepository apiKeys;
- public AccountService(UserRepository users,SessionRepository sessions,MembershipRepository memberships,ApiKeyRepository apiKeys){this.users=users;this.sessions=sessions;this.memberships=memberships;this.apiKeys=apiKeys;}
+ private final SecondFactorService factors;
+ public AccountService(UserRepository users,SessionRepository sessions,MembershipRepository memberships,ApiKeyRepository apiKeys,SecondFactorService factors){this.users=users;this.sessions=sessions;this.memberships=memberships;this.apiKeys=apiKeys;this.factors=factors;}
  public record Profile(Long id,String username,String role,boolean enabled,boolean passwordChangeRequired){}
  public record Login(String token,Instant expiresAt,Profile user){}
  public static String hash(String token){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8)));}catch(Exception e){throw new IllegalStateException(e);}}
@@ -24,22 +25,31 @@ public class AccountService {
   if(token==null || !token.matches("[a-f0-9]{64}"))return Optional.empty();
   return sessions.findById(hash(token)).filter(s->s.expiresAt.isAfter(Instant.now())).flatMap(s->users.findById(s.userId)).filter(u->u.enabled);
  }
+ @Transactional public Login login(String username,String password){return login(username,password,null);}
  @Transactional
- public Login login(String username,String password){
+ public Login login(String username,String password,String code){
   if(username==null || password==null || password.getBytes(StandardCharsets.UTF_8).length>72)return null;
   var found=users.lockByUsername(username);
   if(found.isEmpty()){encoder.matches(password,dummy);return null;}
   PortalUser user=found.get();
   if(!user.enabled || (user.lockedUntil!=null && user.lockedUntil.isAfter(Instant.now())))return null;
-  if(!encoder.matches(password,user.passwordHash)){
-   user.failedLogins++;if(user.failedLogins>=5){user.lockedUntil=Instant.now().plusSeconds(900);user.failedLogins=0;}users.save(user);return null;
-  }
+  if(!encoder.matches(password,user.passwordHash) || !secondFactor(user.id,code)){failed(user);return null;}
   user.failedLogins=0;user.lockedUntil=null;users.save(user);
   byte[] bytes=new byte[32];new SecureRandom().nextBytes(bytes);String token=HexFormat.of().formatHex(bytes);
   LoginSession session=new LoginSession();session.tokenHash=hash(token);session.userId=user.id;session.expiresAt=Instant.now().plusSeconds(8*3600);sessions.save(session);
   return new Login(token,session.expiresAt,profile(user));
  }
  public void logout(String token){if(token!=null)sessions.deleteById(hash(token));}
+ @Transactional public Login loginExternal(Long id,String code){var found=users.lockById(id);if(found.isEmpty())return null;var user=found.get();if(!user.enabled || user.passwordChangeRequired || (user.lockedUntil!=null && user.lockedUntil.isAfter(Instant.now())))return null;if(!secondFactor(id,code)){failed(user);return null;}user.failedLogins=0;user.lockedUntil=null;users.saveAndFlush(user);byte[] bytes=new byte[32];new SecureRandom().nextBytes(bytes);String token=HexFormat.of().formatHex(bytes);LoginSession session=new LoginSession();session.tokenHash=hash(token);session.userId=id;session.expiresAt=Instant.now().plusSeconds(8*3600);sessions.saveAndFlush(session);return new Login(token,session.expiresAt,profile(user));}
+ private boolean secondFactor(Long user,String code){try{return factors.verifyLocked(user,code);}catch(ResponseStatusException e){throw e;}catch(Exception e){throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Account verification is temporarily unavailable");}}
+ @Transactional public void failedVerification(Long id){failed(users.lockById(id).orElseThrow());}
+ private void failed(PortalUser user){user.failedLogins++;if(user.failedLogins>=5){user.lockedUntil=Instant.now().plusSeconds(900);user.failedLogins=0;}users.saveAndFlush(user);}
+ @Transactional public boolean verifyPassword(Long id,String password){var user=users.lockById(id).orElseThrow();if(!user.enabled || (user.lockedUntil!=null && user.lockedUntil.isAfter(Instant.now())))return false;if(password==null || password.getBytes(StandardCharsets.UTF_8).length>72 || !encoder.matches(password,user.passwordHash)){failed(user);return false;}return true;}
+ @Transactional public boolean recover(String username,String token,String password,String code){
+  validatePassword(password);if(username==null || username.length()>40)return false;var found=users.lockByUsername(username);if(found.isEmpty())return false;var user=found.get();if(!user.enabled || (user.lockedUntil!=null && user.lockedUntil.isAfter(Instant.now())))return false;
+  if(!factors.hasAccountRecoveryLocked(user.id,token) || !secondFactor(user.id,code)){failed(user);return false;}
+  if(encoder.matches(password,user.passwordHash))return false;factors.consumeAccountRecoveryLocked(user.id,token);user.passwordHash=encoder.encode(password);user.passwordChangeRequired=false;user.failedLogins=0;user.lockedUntil=null;users.saveAndFlush(user);sessions.deleteAllByUserId(user.id);apiKeys.deleteAllByUserId(user.id);return true;
+ }
  @Transactional public PortalUser create(String username,String password,String role){
   validatePassword(password);
   if(!username.matches("[a-z][a-z0-9_.-]{2,39}") || !Set.of("ADMIN","SIGNER","VIEWER").contains(role))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid username or role");
