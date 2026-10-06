@@ -65,5 +65,10 @@ old credentials and in-flight publication authority.
 Official public inspection also uses UI settings. Allow verified HTTPS access to
 raw.githubusercontent.com for the fixed C2PA conformance lists, or configure a
 trusted HTTP CONNECT proxy and public CA bundle through the UI. Fetch/test/activate
-the lists and refresh before their cache expiry. Public online revocation is not
-checked; this deployment does not claim product certification.
+the lists and refresh before their cache expiry. Optional public signer-chain revocation uses UI-pinned issuer certificates, fresh
+complete signed CRLs and an explicit nonce-capable OCSP service covering every
+issuer below the official anchor. Supply separate responder TLS trust as needed;
+the source-access proxy also carries OCSP requests. Positive sample testing is
+required before activating this option. Refresh CRLs before expiry. Historical
+trust intervals are supported; timestamp/ingredient revocation and product
+certification remain outside this deployment.

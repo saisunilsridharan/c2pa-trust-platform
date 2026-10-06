@@ -27,6 +27,9 @@ public final class OnlineOcsp {
   PrivateObjectStorage.trust(c.tlsCaPem());
  }
  public static void check(Configuration c,X509Certificate certificate,X509Certificate issuer,Collection<java.security.cert.X509CRL> crls)throws Exception{
+  check(c,certificate,issuer,crls,null);
+ }
+ public static void check(Configuration c,X509Certificate certificate,X509Certificate issuer,Collection<java.security.cert.X509CRL> crls,String proxyEndpoint)throws Exception{
   validate(c);
   var digests=new JcaDigestCalculatorProviderBuilder().build();
   // SHA-1 here identifies an issuer; response signatures require a strong algorithm.
@@ -35,6 +38,7 @@ public final class OnlineOcsp {
   var builder=new OCSPReqBuilder();builder.addRequest(id);
   builder.setRequestExtensions(new Extensions(new Extension(OCSPObjectIdentifiers.id_pkix_ocsp_nonce,false,new DEROctetString(nonce).getEncoded())));
   var http=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).followRedirects(HttpClient.Redirect.NEVER);
+  if(proxyEndpoint!=null && !proxyEndpoint.isBlank()){var proxy=URI.create(proxyEndpoint);http.proxy(java.net.ProxySelector.of(new java.net.InetSocketAddress(proxy.getHost(),proxy.getPort())));}
   var managers=PrivateObjectStorage.trust(c.tlsCaPem());if(managers!=null){var ssl=javax.net.ssl.SSLContext.getInstance("TLS");ssl.init(null,managers,null);http.sslContext(ssl);}
   var request=HttpRequest.newBuilder(URI.create(c.endpoint())).timeout(Duration.ofSeconds(10)).header("Content-Type","application/ocsp-request").header("Accept","application/ocsp-response").POST(HttpRequest.BodyPublishers.ofByteArray(builder.build().getEncoded())).build();
   byte[] body;

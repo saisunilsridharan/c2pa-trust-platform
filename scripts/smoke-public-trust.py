@@ -27,6 +27,7 @@ def run(call, multipart, signed, workspace):
 
     state = call('/admin/public-trust')
     denied(lambda: call('/admin/public-trust/fetch', {'revision': state['revision'], 'configuration': {**config, 'tlsCaPem': '-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----'}}), 502)
+    denied(lambda: call('/admin/public-trust/fetch', {'revision': state['revision'], 'configuration': {**config, 'revocation': {'enabled': True, 'requireCoveredSigning': False, 'issuerCertificatesPem': '', 'crlsPem': ''}}}), 502)
     state = call('/admin/public-trust/fetch', {'revision': state['revision'], 'configuration': config})
     v = state['draft']
     assert v['summary']['current'] and v['summary']['signerAnchors'] > 0 and v['summary']['tsaAnchors'] > 0
@@ -43,6 +44,8 @@ def run(call, multipart, signed, workspace):
     data, headers = multipart({}, 'private.png', signed)
     report = call('/verification', data=data, extra=headers)
     public = report['portal_public_trust']
+    assert public['revocationScope'] == 'SIGNER_CHAIN' and public['revocationStatus'] == 'DISABLED'
+    assert not public['timestampRevocationChecked'] and not public['ingredientRevocationChecked']
     assert public['configured'] and public['current'] and not public['publicTrustVerified'] and not public['onlineRevocationChecked']
     assert public['versionId'] == v['id'] and public['signerSource'].startswith('https://raw.githubusercontent.com/c2pa-org/conformance-public/')
     assert public['signerSha256'] == v['summary']['signerSha256']

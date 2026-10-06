@@ -43,7 +43,8 @@ import java.util.*;
  }
  public Configuration validate(Configuration c)throws Exception{try{validated(c);return c.enabled()?c:new Configuration(false,false,"","");}catch(Exception e){throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Supply current complete CRLs signed by pinned CA issuers with CRL-signing usage. Delta, scoped/indirect, duplicate, stale and unsupported CRLs are rejected.");}}
  public Summary summary(Configuration c)throws Exception{return validated(c).summary();}
- public void check(Configuration c,Collection<X509Certificate> chain)throws Exception{
+ public void check(Configuration c,Collection<X509Certificate> chain)throws Exception{check(c,chain,null);}
+ public void check(Configuration c,Collection<X509Certificate> chain,String proxyEndpoint)throws Exception{
   var policy=validated(c);if(!c.enabled())return;if(chain.isEmpty() || chain.size()>10)throw new IllegalArgumentException();
   var certificates=new ArrayList<>(chain);
   for(int i=0;i<certificates.size();i++){
@@ -52,7 +53,7 @@ import java.util.*;
    var issuer=policy.issuers().stream().filter(v->{try{if(!certificate.getIssuerX500Principal().equals(v.getSubjectX500Principal()))return false;certificate.verify(v.getPublicKey());return true;}catch(Exception e){return false;}}).findFirst().orElse(null);
    if(issuer==null){if(c.requireCoveredSigning())throw new IllegalStateException("Certificate issuer is not covered by the active CRL policy");continue;}
    var crl=policy.crls().stream().filter(v->signs(v,issuer)).findFirst().orElseThrow();if(crl.isRevoked(certificate))throw new RevokedCertificateException();
-   if(c.onlineOcsp()!=null)OnlineOcsp.check(c.onlineOcsp(),certificate,issuer,policy.crls());
+   if(c.onlineOcsp()!=null)OnlineOcsp.check(c.onlineOcsp(),certificate,issuer,policy.crls(),proxyEndpoint);
   }
  }
  public void enforce(Long workspace,Path certificate)throws Exception{
