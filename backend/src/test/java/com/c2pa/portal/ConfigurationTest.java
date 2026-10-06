@@ -44,5 +44,13 @@ class ConfigurationTest {
   mvc.perform(post("/api/v1/admin/signing-identity/development").header("X-Admin-Token",token).contentType("application/json").content("{\"acknowledgeUntrusted\":false}")).andExpect(status().isBadRequest());
   mvc.perform(multipart("/api/v1/signing").file(new org.springframework.mock.web.MockMultipartFile("file","sample.png","image/png",new byte[]{1})).param("creator","Creator").param("title","Title").param("acknowledgePublicClaims","false").header("X-Admin-Token",token)).andExpect(status().isBadRequest());
   mvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andExpect(jsonPath("$.components.securitySchemes.adminToken.name").value("X-Admin-Token"));
+  var api=mapper.readTree(mvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+  var publicDraft=schema(api,api.path("paths").path("/api/v1/admin/public-trust/fetch").path("post").path("requestBody").path("content").path("application/json").path("schema"));var publicConfiguration=schema(api,publicDraft.path("properties").path("configuration"));
+  org.junit.jupiter.api.Assertions.assertTrue(publicConfiguration.path("properties").has("revocation"));org.junit.jupiter.api.Assertions.assertTrue(publicConfiguration.path("properties").has("maxAgeHours"));org.junit.jupiter.api.Assertions.assertFalse(publicConfiguration.path("properties").has("credentialId"));
+  var revocation=schema(api,publicConfiguration.path("properties").path("revocation"));var ocsp=schema(api,revocation.path("properties").path("onlineOcsp"));org.junit.jupiter.api.Assertions.assertTrue(ocsp.path("properties").has("endpoint"));
+  var webhookDraft=schema(api,api.path("paths").path("/api/v1/admin/webhooks/draft").path("put").path("requestBody").path("content").path("application/json").path("schema"));org.junit.jupiter.api.Assertions.assertTrue(schema(api,webhookDraft.path("properties").path("configuration")).path("properties").has("maxAttempts"));
+  var agentDraft=schema(api,api.path("paths").path("/api/v1/admin/remote-workers/agent").path("put").path("requestBody").path("content").path("application/json").path("schema"));org.junit.jupiter.api.Assertions.assertTrue(schema(api,agentDraft.path("properties").path("configuration")).path("properties").has("hubEndpoint"));
  }
+ private com.fasterxml.jackson.databind.JsonNode schema(com.fasterxml.jackson.databind.JsonNode document,com.fasterxml.jackson.databind.JsonNode value){if(value.has("$ref"))return document.path("components").path("schemas").path(value.path("$ref").asText().substring("#/components/schemas/".length()));return value;}
+
 }

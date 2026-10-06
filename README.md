@@ -273,3 +273,5 @@ Historical service statuses are parsed as trusted intervals ending at the next r
 Add `--public-trust` to the disposable integration command to exercise actual authenticated official downloads, activation and private-signer rejection.
 
 Public revocation supplements list membership; it does not add private issuers to the official list or change private signing policies. Complete CRL refresh is manual; nonce echo and fresh status are mandatory. The configured responder must cover all issuers in the validated signer path, so use an appropriate OCSP gateway where multiple issuer services need routing. Expired issuer/CRL data fails closed even for historical content.
+
+OpenAPI now uses qualified schema names to distinguish provider records with shared simple names. Regenerate generated client types from the current `/v3/api-docs` when upgrading. Swagger tests follow request references for public trust, OCSP, webhooks and remote-agent configuration.
