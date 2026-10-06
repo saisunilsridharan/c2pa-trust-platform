@@ -4,16 +4,37 @@ services:
       context: ..
       dockerfile: infra/Dockerfile.api
     restart: unless-stopped
+    environment:
+      DB_URL: ${DB_URL:-jdbc:h2:file:./.local/portal}
+      DB_USER: ${DB_USER:-sa}
+      DB_PASSWORD: ${DB_PASSWORD:-}
     volumes:
       - portal-data:/app/backend/.local
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
   web:
     build:
       context: ..
       dockerfile: infra/Dockerfile.web
     restart: unless-stopped
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     ports:
       - "127.0.0.1:5173:5173"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=16m,mode=1777
+      - /var/cache/nginx:rw,nosuid,nodev,size=16m,uid=101,gid=101
+      - /var/run:rw,nosuid,nodev,size=1m,uid=101,gid=101
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 volumes:
   portal-data:

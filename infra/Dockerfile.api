@@ -1,19 +1,30 @@
 FROM maven:3.9-eclipse-temurin-21 AS java-build
 WORKDIR /build
 COPY backend/ backend/
-RUN mvn -B -f backend/pom.xml package -DskipTests
+RUN --mount=type=secret,id=maven_settings --mount=type=secret,id=build_ca \
+    if [ -f /run/secrets/build_ca ]; then \
+      cp "$JAVA_HOME/lib/security/cacerts" /tmp/build-cacerts; \
+      mkdir /tmp/build-certificates; \
+      awk '/-----BEGIN CERTIFICATE-----/ {n++} n {print > ("/tmp/build-certificates/ca-" n ".pem")}' /run/secrets/build_ca; \
+      for BUILD_ROOT in /tmp/build-certificates/*.pem; do keytool -importcert -noprompt -alias "$(basename "$BUILD_ROOT")" -file "$BUILD_ROOT" -keystore /tmp/build-cacerts -storepass changeit > /dev/null; done; \
+      export MAVEN_OPTS="${MAVEN_OPTS:-} -Djavax.net.ssl.trustStore=/tmp/build-cacerts"; \
+    fi; \
+    if [ -f /run/secrets/maven_settings ]; then mvn -B -s /run/secrets/maven_settings -f backend/pom.xml package -DskipTests; else mvn -B -f backend/pom.xml package -DskipTests; fi
 
 FROM rust:1.99-bookworm AS rust-build
 WORKDIR /build
 COPY c2pa-worker/ c2pa-worker/
-RUN cargo build --locked --release --manifest-path c2pa-worker/Cargo.toml -j 2
+RUN --mount=type=secret,id=network_proxy --mount=type=secret,id=build_ca \
+    if [ -f /run/secrets/network_proxy ]; then BUILD_HTTP_PROXY="$(cat /run/secrets/network_proxy)"; export HTTP_PROXY="$BUILD_HTTP_PROXY" HTTPS_PROXY="$BUILD_HTTP_PROXY" http_proxy="$BUILD_HTTP_PROXY" https_proxy="$BUILD_HTTP_PROXY"; fi; if [ -f /run/secrets/build_ca ]; then export CARGO_HTTP_CAINFO=/run/secrets/build_ca; fi; cargo build --locked --release --manifest-path c2pa-worker/Cargo.toml -j 2
 
 FROM eclipse-temurin:21-jre-noble
-RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+RUN --mount=type=secret,id=network_proxy \
+    if [ -f /run/secrets/network_proxy ]; then BUILD_HTTP_PROXY="$(cat /run/secrets/network_proxy)"; export HTTP_PROXY="$BUILD_HTTP_PROXY" HTTPS_PROXY="$BUILD_HTTP_PROXY" http_proxy="$BUILD_HTTP_PROXY" https_proxy="$BUILD_HTTP_PROXY"; fi; apt-get update && apt-get install -y --no-install-recommends openssl util-linux bubblewrap curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app/backend
 COPY --from=java-build /build/backend/target/portal-api-0.1.0.jar /app/backend/portal-api.jar
 COPY --from=rust-build /build/c2pa-worker/target/release/c2pa-worker /app/c2pa-worker/target/debug/c2pa-worker
 RUN mkdir -p /app/backend/.local && chown -R 10001:10001 /app && chmod 700 /app/backend/.local && chmod 755 /app/c2pa-worker/target/debug/c2pa-worker
 USER 10001:10001
 EXPOSE 8080
-ENTRYPOINT ["java", "-jar", "portal-api.jar", "--server.address=0.0.0.0"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 CMD curl --fail --silent http://127.0.0.1:8080/api/v1/health > /dev/null || exit 1
+ENTRYPOINT ["java", "-Xms128m", "-Xmx1g", "-jar", "portal-api.jar", "--server.address=0.0.0.0"]

@@ -866,7 +866,23 @@ def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, 
                     assert report['validation_state'] == 'Valid' and len(report['manifests']) >= 2, extension
                     data, headers = multipart({}, 'misleading.png', helpers['tamper'](extension, result))
                     assert call('/verification', data=data, extra=headers)['validation_state'] == 'Invalid', extension
-                    print(mime + ': signing, inspection, re-signing and tamper detection passed.', flush=True)
+                    assert helpers['decoded_content'](extension, (folder / ('sample.' + extension)).read_bytes()) == helpers['decoded_content'](extension, result), extension + ' decoded content changed'
+                    print(mime + ': signing, inspection, re-signing, tamper detection and independent content decoding passed.', flush=True)
+                for filename in helpers['variant_fixtures'](folder):
+                    extension = filename.rsplit('.', 1)[1]; original = (folder / filename).read_bytes()
+                    expected = helpers['decoded_content'](extension, original)
+                    data, headers = multipart(format_fields, 'misleading.png', original)
+                    result = call('/signing', data=data, extra=headers, raw=True)
+                    data, headers = multipart({}, 'misleading.png', result)
+                    assert call('/verification', data=data, extra=headers)['validation_state'] == 'Valid', filename
+                    assert helpers['decoded_content'](extension, result) == expected, filename + ' decoded content changed'
+                    data, headers = multipart(format_fields, 'misleading.png', result)
+                    resigned = call('/signing', data=data, extra=headers, raw=True)
+                    data, headers = multipart({}, 'misleading.png', resigned)
+                    report = call('/verification', data=data, extra=headers)
+                    assert report['validation_state'] == 'Valid' and len(report['manifests']) >= 2, filename
+                    assert helpers['decoded_content'](extension, resigned) == expected, filename + ' re-signing changed decoded content'
+                    print(filename + ': signing, preserved provenance and independent decoded-content equality passed.', flush=True)
             print(('PostgreSQL'  if postgres_bin else 'H2') + (': PKCS#11/non-exportable SoftHSM signing, ' if softhsm_dir else ': ') + ('RFC 3161 timestamps/snapshots, ' if timestamps else '') + 'worker resource limits/sandbox capability, private trust policy/snapshots, approved signing choices/rotation/withdrawal, MFA, one-time account recovery, migrations, leased native C2PA job, private storage, SigV4, scoped API-key signing/revocation, provider snapshots, notifications, HMAC webhooks, audit checkpoint, workspace isolation, restart persistence and encryption-key recovery passed.')
         finally:
             stop(); fixture.shutdown(); fixture.server_close()

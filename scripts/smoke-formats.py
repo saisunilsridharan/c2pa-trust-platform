@@ -145,3 +145,83 @@ def run(base=None, token=None):
 
 if __name__ == '__main__':
     run()
+
+
+def variant_fixtures(folder):
+    """Content variants decoded independently of the C2PA SDK."""
+    from PIL import Image
+    from pypdf import PdfWriter
+    from pypdf.generic import DictionaryObject, NameObject, DecodedStreamObject
+    rows = []
+    image = Image.new('RGBA', (48, 32), (30, 120, 220, 80))
+    for name, options in [('alpha.png', {}), ('alpha.webp', {'lossless': True})]:
+        image.save(folder / name, **options); rows.append(name)
+    image.convert('RGB').save(folder / 'progressive.jpg', progressive=True, quality=85); rows.append('progressive.jpg')
+    image.convert('P', palette=Image.Palette.ADAPTIVE).save(folder / 'palette.png'); rows.append('palette.png')
+    grayscale = Image.new('I;16', (48, 32), 40000)
+    grayscale.save(folder / 'gray16.png'); rows.append('gray16.png')
+    image.convert('RGB').save(folder / 'multipage.tif', save_all=True, append_images=[Image.new('RGB',(32,48),'green')], compression='tiff_lzw'); rows.append('multipage.tif')
+    with wave.open(str(folder / 'stereo.wav'), 'wb') as output:
+        output.setnchannels(2); output.setsampwidth(2); output.setframerate(48000); output.writeframes(b'\x01\x00\x02\x00' * 9600)
+    rows.append('stereo.wav')
+    subprocess.run(['ffmpeg','-v','error','-y','-i',str(folder/'stereo.wav'),'-c:a','libmp3lame','-q:a','4','-threads','1',str(folder/'stereo-vbr.mp3')],check=True,capture_output=True);rows.append('stereo-vbr.mp3')
+    subprocess.run(['ffmpeg','-v','error','-y','-i',str(folder/'stereo.wav'),'-threads','1',str(folder/'stereo.flac')],check=True,capture_output=True);rows.append('stereo.flac')
+    subprocess.run(['ffmpeg','-v','error','-y','-loop','1','-i',str(folder/'sample.png'),'-i',str(folder/'stereo.wav'),'-t','0.2','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-movflags','frag_keyframe+empty_moov','-threads','1',str(folder/'fragmented.mp4')],check=True,capture_output=True);rows.append('fragmented.mp4')
+    writer = PdfWriter()
+    for index in range(3):
+        page = writer.add_blank_page(width=200+index*10, height=300)
+        font = DictionaryObject({NameObject('/Type'):NameObject('/Font'),NameObject('/Subtype'):NameObject('/Type1'),NameObject('/BaseFont'):NameObject('/Helvetica')})
+        page[NameObject('/Resources')] = DictionaryObject({NameObject('/Font'):DictionaryObject({NameObject('/F1'):writer._add_object(font)})})
+        stream=DecodedStreamObject();stream.set_data(f'BT /F1 12 Tf 20 50 Td (Portal page {index+1}) Tj ET'.encode())
+        page[NameObject('/Contents')]=writer._add_object(stream.flate_encode())
+    writer.add_metadata({'/Title':'Compressed multipage interoperability fixture'})
+    with (folder/'multipage.pdf').open('wb') as output:writer.write(output)
+    rows.append('multipage.pdf')
+    return rows
+
+
+def tiff_image_directory_copy(content):
+    """Detach only the final C2PA-only IFD in a temporary decoding copy (C2PA 2.4 A.3.6)."""
+    if content[:4] not in (b'II*\0', b'MM\0*'): raise ValueError('Classic TIFF header required')
+    order = '<' if content[:2] == b'II' else '>'
+    offset = struct.unpack_from(order+'I', content, 4)[0]
+    seen = set(); previous_next = None
+    while offset:
+        if offset in seen or len(seen) >= 10000: raise ValueError('Invalid TIFF directory chain')
+        seen.add(offset)
+        if offset < 8 or offset+2 > len(content): raise ValueError('Invalid TIFF directory offset')
+        count = struct.unpack_from(order+'H', content, offset)[0]
+        next_position = offset+2+12*count
+        if next_position+4 > len(content): raise ValueError('Truncated TIFF directory')
+        next_offset = struct.unpack_from(order+'I', content, next_position)[0]
+        if count == 1:
+            tag, kind, length, payload = struct.unpack_from(order+'HHII',content,offset+2)
+            if tag == 0xcd41:
+                if kind != 7 or length <= 4 or payload+length > len(content) or next_offset != 0 or previous_next is None: raise ValueError('Invalid C2PA-only TIFF directory')
+                result=bytearray(content);struct.pack_into(order+'I',result,previous_next,0);return bytes(result)
+        previous_next=next_position;offset=next_offset
+    return content
+
+
+def decoded_content(extension, content):
+    """Compare rendered/decoded content rather than mutable metadata/manifest bytes."""
+    import io
+    import hashlib
+    if extension in ('png','jpg','webp','tif'):
+        from PIL import Image, ImageSequence
+        with Image.open(io.BytesIO(tiff_image_directory_copy(content) if extension == 'tif' else content)) as image:
+            return [(frame.size, frame.mode if frame.mode.startswith('I') else 'RGBA', hashlib.sha256(frame.tobytes() if frame.mode.startswith('I') else frame.convert('RGBA').tobytes()).hexdigest()) for frame in ImageSequence.Iterator(image)]
+    if extension == 'pdf':
+        from pypdf import PdfReader
+        reader=PdfReader(io.BytesIO(content),strict=True)
+        return [(tuple(float(v) for v in page.mediabox),page.extract_text(),page.get_contents().get_data() if page.get_contents() else b'') for page in reader.pages]
+    with tempfile.TemporaryDirectory(prefix='c2pa-independent-decode-') as temporary:
+        source=Path(temporary)/('content.'+extension);source.write_bytes(content)
+        if extension == 'mp4':
+            result=subprocess.run(['ffmpeg','-v','error','-i',str(source),'-map','0:v:0','-f','framemd5','-'],check=True,capture_output=True,timeout=30)
+            video=tuple(line for line in result.stdout.splitlines() if not line.startswith(b'#'))
+            result=subprocess.run(['ffprobe','-v','error','-show_entries','stream=codec_type','-of','json',str(source)],check=True,capture_output=True,timeout=15)
+            if not any(s['codec_type']=='audio' for s in json.loads(result.stdout)['streams']):return video
+        else:video=None
+        audio=subprocess.run(['ffmpeg','-v','error','-i',str(source),'-map','0:a:0','-f','s16le','-acodec','pcm_s16le','-'],check=True,capture_output=True,timeout=30).stdout
+        return video,hashlib.sha256(audio).hexdigest()
