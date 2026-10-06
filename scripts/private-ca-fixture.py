@@ -138,3 +138,41 @@ def crl_fixture(folder, revoked_certificate=None, expired=False):
         verification = run('crl', '-in', str(working / 'crl.pem'), '-verify', '-CAfile', str(folder / 'root.pem'))
         assert b'verify OK' in verification.stdout + verification.stderr
         return (working / 'crl.pem').read_text()
+
+
+def ocsp_fixture(folder, certificate):
+    """Independent OpenSSL OCSP responses bound to each received request nonce."""
+    import datetime
+    import tempfile
+    folder = Path(folder).resolve()
+    def run(*args):
+        result = subprocess.run(['openssl', *args], capture_output=True, timeout=15)
+        assert result.returncode == 0, 'Disposable OCSP OpenSSL operation failed; output omitted'
+        return result.stdout.decode().strip()
+    serial = run('x509', '-in', str(certificate), '-serial', '-noout').split('=', 1)[1]
+    expiry = run('x509', '-in', str(certificate), '-enddate', '-noout').split('=', 1)[1]
+    expiry = datetime.datetime.strptime(expiry, '%b %d %H:%M:%S %Y %Z').strftime('%y%m%d%H%M%SZ')
+    modes = {'value': 'good', 'requests': 0}
+    lock = threading.Lock()
+    class OCSP(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_): pass
+        def do_POST(self):
+            length = int(self.headers.get('Content-Length', '0'))
+            if not 0 < length <= 65536 or self.headers.get('Content-Type') != 'application/ocsp-request':
+                self.send_response(400); self.end_headers(); return
+            body = self.rfile.read(length)
+            with lock, tempfile.TemporaryDirectory(prefix='ocsp-', dir=folder) as temporary:
+                working = Path(temporary)
+                mode = modes['value']; modes['requests'] += 1
+                status = 'R' if mode == 'revoked' else 'V'
+                revoked = datetime.datetime.now(datetime.timezone.utc).strftime('%y%m%d%H%M%SZ') if status == 'R' else ''
+                (working / 'index').write_text('' if mode == 'unknown' else f'{status}\t{expiry}\t{revoked}\t{serial}\tunknown\t/CN=Disposable Signing Leaf\n')
+                (working / 'request.der').write_bytes(body)
+                run('ocsp', '-index', str(working / 'index'), '-CA', str(folder / 'root.pem'),
+                    '-rsigner', str(folder / 'root.pem'), '-rkey', str(folder / 'root.key'),
+                    '-reqin', str(working / 'request.der'), '-respout', str(working / 'response.der'), '-nmin', '5', '-rmd', 'sha256')
+                response = (working / 'response.der').read_bytes()
+            self.send_response(200); self.send_header('Content-Type', 'application/ocsp-response'); self.send_header('Content-Length', str(len(response))); self.end_headers(); self.wfile.write(response)
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), OCSP)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, modes

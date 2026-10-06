@@ -6,6 +6,7 @@ type Config = {
   requireCoveredSigning: boolean;
   issuerCertificatesPem: string;
   crlsPem: string;
+  onlineOcsp?: { endpoint: string; tlsCaPem: string; allowLoopbackHttp: boolean } | null;
 };
 type Version = {
   id: string;
@@ -29,6 +30,7 @@ const initial: Config = {
   requireCoveredSigning: true,
   issuerCertificatesPem: "",
   crlsPem: "",
+  onlineOcsp: null,
 };
 export default function RevocationPanel({ token }: { token: string }) {
   const fetch = workspaceFetch();
@@ -188,6 +190,26 @@ export default function RevocationPanel({ token }: { token: string }) {
       >
         Save draft
       </button>
+      <label>
+        <input type="checkbox" checked={!!form.onlineOcsp} disabled={!form.enabled}
+          onChange={e => setForm({ ...form, onlineOcsp: e.target.checked ? { endpoint: "", tlsCaPem: "", allowLoopbackHttp: false } : null })} />
+        Also require a fresh online OCSP response
+      </label>
+      {form.onlineOcsp && <>
+        <p>OCSP adds online checks to the uploaded CRLs for covered signing certificates. The responder must echo request nonces, return current responses with nextUpdate, and sign as the issuer or its authorized OCSP responder. Outages, unknown status and invalid responses block signing. This private policy does not establish official public trust.</p>
+        <label>OCSP endpoint
+          <input type="url" value={form.onlineOcsp.endpoint} disabled={!form.enabled}
+            onChange={e => setForm({ ...form, onlineOcsp: { ...form.onlineOcsp!, endpoint: e.target.value } })} />
+        </label>
+        <label>Private TLS CA certificates (PEM, optional)
+          <textarea rows={4} value={form.onlineOcsp.tlsCaPem} disabled={!form.enabled}
+            onChange={e => setForm({ ...form, onlineOcsp: { ...form.onlineOcsp!, tlsCaPem: e.target.value } })} />
+        </label>
+        <label><input type="checkbox" checked={form.onlineOcsp.allowLoopbackHttp} disabled={!form.enabled}
+          onChange={e => setForm({ ...form, onlineOcsp: { ...form.onlineOcsp!, allowLoopbackHttp: e.target.checked } })} />
+          Allow loopback HTTP for local development
+        </label>
+      </>}
       <label>
         Policy version
         <select

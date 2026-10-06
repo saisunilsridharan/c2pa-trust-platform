@@ -10,7 +10,9 @@ import java.time.Instant;
 import java.util.*;
 @Service public class CertificateRevocations {
  public static class RevokedCertificateException extends CertificateException { public RevokedCertificateException(){super("Certificate is revoked");} }
- public record Configuration(boolean enabled,boolean requireCoveredSigning,String issuerCertificatesPem,String crlsPem){}
+ public record Configuration(boolean enabled,boolean requireCoveredSigning,String issuerCertificatesPem,String crlsPem,OnlineOcsp.Configuration onlineOcsp){
+  public Configuration(boolean enabled,boolean requireCoveredSigning,String issuerCertificatesPem,String crlsPem){this(enabled,requireCoveredSigning,issuerCertificatesPem,crlsPem,null);}
+ }
  public record Summary(int issuers,int crls,int revokedEntries,Instant nextUpdate){}
  private record Validated(List<X509Certificate> issuers,List<X509CRL> crls,Summary summary){}
  private final RevocationSettingsRepository settings;private final RevocationVersionRepository versions;private final ObjectMapper mapper;
@@ -21,6 +23,7 @@ import java.util.*;
  private boolean signs(X509CRL crl,X509Certificate issuer){try{if(!crl.getIssuerX500Principal().equals(issuer.getSubjectX500Principal()))return false;crl.verify(issuer.getPublicKey());return true;}catch(Exception e){return false;}}
  private Validated validated(Configuration c)throws Exception{
   if(c==null)throw new IllegalArgumentException();if(!c.enabled())return new Validated(List.of(),List.of(),new Summary(0,0,0,null));
+  OnlineOcsp.validate(c.onlineOcsp());
   if(c.issuerCertificatesPem()==null || c.crlsPem()==null || c.issuerCertificatesPem().length()>60000 || c.crlsPem().length()>400000)throw new IllegalArgumentException();
   if(!c.issuerCertificatesPem().matches("(?s)(?:\\s*-----BEGIN CERTIFICATE-----[A-Za-z0-9+/=\\s]+-----END CERTIFICATE-----\\s*)+") || !c.crlsPem().matches("(?s)(?:\\s*-----BEGIN X509 CRL-----[A-Za-z0-9+/=\\s]+-----END X509 CRL-----\\s*)+"))throw new IllegalArgumentException();
   var factory=CertificateFactory.getInstance("X.509");var issuers=factory.generateCertificates(new ByteArrayInputStream(c.issuerCertificatesPem().getBytes(java.nio.charset.StandardCharsets.US_ASCII))).stream().map(v->(X509Certificate)v).toList();
@@ -49,6 +52,7 @@ import java.util.*;
    var issuer=policy.issuers().stream().filter(v->{try{if(!certificate.getIssuerX500Principal().equals(v.getSubjectX500Principal()))return false;certificate.verify(v.getPublicKey());return true;}catch(Exception e){return false;}}).findFirst().orElse(null);
    if(issuer==null){if(c.requireCoveredSigning())throw new IllegalStateException("Certificate issuer is not covered by the active CRL policy");continue;}
    var crl=policy.crls().stream().filter(v->signs(v,issuer)).findFirst().orElseThrow();if(crl.isRevoked(certificate))throw new RevokedCertificateException();
+   if(c.onlineOcsp()!=null)OnlineOcsp.check(c.onlineOcsp(),certificate,issuer,policy.crls());
   }
  }
  public void enforce(Long workspace,Path certificate)throws Exception{

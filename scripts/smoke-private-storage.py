@@ -250,6 +250,7 @@ def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, 
         if lock_server: threading.Thread(target=lock_server.serve_forever, daemon=True).start()
         tsa_server, tsa_anchor = timestamp_fixture(sandbox / "tsa") if timestamps else (None, None)
         application = None
+        ocsp_server = None
         log = (sandbox / 'application.log').open('wb')
         token = ''
         postgres = None
@@ -796,6 +797,26 @@ def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, 
                 call('/admin/revocation/activate', selection)
                 data, headers = multipart(renewed_fields, 'crl-allowed.png', png)
                 assert call('/signing', data=data, extra=headers, raw=True)
+                ocsp_server, ocsp_modes = runpy.run_path(str(ROOT / 'scripts/private-ca-fixture.py'))['ocsp_fixture'](sandbox / 'private-ca', chain_path)
+                ocsp_config = {**revocation_config, 'onlineOcsp': {'endpoint': f'http://127.0.0.1:{ocsp_server.server_port}/ocsp', 'tlsCaPem': '', 'allowLoopbackHttp': True}}
+                revocation = call('/admin/revocation/draft', {'revision': call('/admin/revocation')['revision'], 'configuration': ocsp_config}, method='PUT')
+                selection = {'revision': revocation['revision'], 'versionId': revocation['draft']['id'], 'acknowledgeSigningEnforcement': True}
+                denied(lambda: call('/admin/revocation/activate', selection), 409)
+                ocsp_modes['value'] = 'unknown'
+                denied(lambda: call('/admin/revocation/test', {**selection, 'signingChoiceId': renewed_choice['id'], 'expectRevoked': False}), 400)
+                ocsp_modes['value'] = 'good'
+                call('/admin/revocation/test', {**selection, 'signingChoiceId': renewed_choice['id'], 'expectRevoked': False})
+                call('/admin/revocation/activate', selection)
+                data, headers = multipart(renewed_fields, 'ocsp-allowed.png', png)
+                assert call('/signing', data=data, extra=headers, raw=True)
+                ocsp_modes['value'] = 'unknown'
+                denied(lambda: call('/signing', data=data, extra=headers, raw=True), 409)
+                ocsp_modes['value'] = 'revoked'
+                denied(lambda: call('/signing', data=data, extra=headers, raw=True), 409)
+                call('/admin/revocation/test', {**selection, 'revision': call('/admin/revocation')['revision'], 'signingChoiceId': renewed_choice['id'], 'expectRevoked': True})
+                ocsp_modes['value'] = 'good'
+                assert ocsp_modes['requests'] >= 6
+                print('Online OCSP: independent OpenSSL nonce-bound issuer signatures, UI test-before-activation, actual HSM signing, unknown/revoked fail-closed enforcement passed.', flush=True)
                 revocation = call('/admin/revocation/draft', {'revision': call('/admin/revocation')['revision'], 'configuration': {**revocation_config, 'crlsPem': revoked_crl}}, method='PUT')
                 selection = {'revision': revocation['revision'], 'versionId': revocation['draft']['id'], 'acknowledgeSigningEnforcement': True}
                 denied(lambda: call('/admin/revocation/test', {**selection, 'signingChoiceId': renewed_choice['id'], 'expectRevoked': False}), 400)
@@ -887,6 +908,7 @@ def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, 
         finally:
             stop(); fixture.shutdown(); fixture.server_close()
             if ca_server is not None: ca_server.shutdown(); ca_server.server_close()
+            if ocsp_server is not None: ocsp_server.shutdown(); ocsp_server.server_close()
             if lock_server is not None: lock_server.shutdown(); lock_server.server_close()
             if tsa_server is not None: tsa_server.shutdown(); tsa_server.server_close()
             if postgres is not None:
