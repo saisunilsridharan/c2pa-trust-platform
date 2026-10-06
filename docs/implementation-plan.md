@@ -29,13 +29,13 @@ Users select approved profile/certificate combinations, review public creator/ti
 
 ## Verified evidence
 
-Java tests cover authorization, account protections, credentials, migrations, leasing, audit integrity, outbox failure/retry, workspace isolation and private OIDC protocol validation. React build and five workspace-request regressions pass; Rust tests exercise the timestamp transport.
+All 49 Java tests pass without skips, covering authorization, account protections, credentials, migrations, leasing, audit integrity, outbox failure/retry, workspace isolation, private OIDC and native public trust validation. React build and five workspace-request regressions pass; two Rust CLI tests verify failure exits. Native integration checks exercise timestamp transport.
 
 The isolated `scripts/smoke-private-storage.py` uses temporary H2 or PostgreSQL 17, an independent SigV4/HMAC/Object Lock fixture, actual non-exportable SoftHSM keys and an independent OpenSSL RFC 3161 TSA. It verifies native signing, snapshots, MFA/recovery, restart persistence and encryption-key restoration without modifying real user data. `--namespace` requires genuine Linux namespaces; `--formats` exercises nine base formats and eleven complex variants, re-signing, tamper rejection and independent decoded-content equality through the software HSM. `--audit-lock` rejects providers with missing versioning, incorrect retention, deletion-enabled versions or changed contents. `--rate-limits` exercises shared UI authentication limits, trusted proxies and restart persistence. `--certificates` uses an independent OpenSSL CA to verify CSR proof of possession and same-key replacement signing, including unavailable-token retry recovery.
 
 `--private-ca` exercises an independent OpenSSL-backed Smallstep protocol fixture, CSR-bound ES256 authorization, actual HSM issuance/signing, scheduled replacement and in-flight pause protection.
 
-`--remote-workers` exercises independent agent/hub databases, actual HSM/TSA signing, probes, isolation, credential rotation and output replay rejection. `--public-trust` fetches the actual official signing/TSA sources over verified HTTPS and tests activation/private-signer rejection. Native public positive tests use synthetic fixture anchors. These checks establish implemented protocols and selected fixtures, not acceptance of every vendor or a deployed official signer.
+H2 and PostgreSQL 17 acceptance passed. `--remote-workers` exercises independent agent/hub databases, actual HSM/TSA signing, probes, isolation, credential rotation and output replay rejection. `--public-trust` fetches the actual official signing/TSA sources over verified HTTPS and tests activation/private-signer rejection. Native public positive tests use synthetic fixture anchors. These checks establish implemented protocols and selected fixtures, not acceptance of every vendor or a deployed official signer.
 
 ## Remaining production work
 
@@ -44,5 +44,7 @@ The isolated `scripts/smoke-private-storage.py` uses temporary H2 or PostgreSQL 
 3. Extend public validation with online/public revocation and historical service-status support before claiming complete conformance validation. Fixed official public trust-list membership inspection is implemented; private complete-CRL signing enforcement and optional nonce-bound OCSP remain distinct.
 4. Deploy and accept separately paired remote hosts under the actual operational signing trust boundary. Registration, routing, leases, callback authentication and output verification are implemented and tested with independent databases.
 5. Accept additional independent C2PA verifier implementations and vendor-specific adapters required by the deployment. Twenty media cases now have independent decoded-content preservation checks; hardened Docker API/web enrollment, native signing, verification and Swagger checks pass. Multipage TIFF uses the specification-mandated C2PA metadata-only IFD, which older generic TIFF viewers may treat as an image.
+
+6. Deploy and verify the latest build on the destination server once SSH is reachable. Ports 22, 80 and 443 on the requested host currently refuse connections; do not treat the running cloud development app as server deployment.
 
 The complete production roadmap is not finished. Keep completed local/private application work distinct from live provider acceptance and the remaining architectural features.
