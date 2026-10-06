@@ -15,17 +15,20 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 @Service
 public class JobService {
- private final JobRepository jobs;private final ConfigurationRepository configs;private final DevelopmentIdentity identity;private final ObjectMapper mapper;private final AuditService audit;private final StorageRepository retention;
+ private final RemoteWorkerSettingsRepository remoteSettings;private final JobRepository jobs;private final ConfigurationRepository configs;private final DevelopmentIdentity identity;private final ObjectMapper mapper;private final AuditService audit;private final StorageRepository retention;
  private final Path storage=Path.of(".local/assets").toAbsolutePath();
  private final StorageVersionRepository storageVersions;private final PrivateObjectStorage objects;
  private final JobCompletion completion;
  private final PrivateTimestamps timestamps;private final TrustPolicy trust;private final WorkerExecution execution;private final SigningChoices choices;private final JobLeases leases;private final ProcessingRepository processing;
- public JobService(JobRepository jobs,ConfigurationRepository configs,DevelopmentIdentity identity,ObjectMapper mapper,AuditService audit,StorageRepository retention,StorageVersionRepository storageVersions,PrivateObjectStorage objects,JobCompletion completion,JobLeases leases,ProcessingRepository processing,SigningChoices choices,WorkerExecution execution,TrustPolicy trust,PrivateTimestamps timestamps){this.timestamps=timestamps;this.trust=trust;this.execution=execution;this.choices=choices;this.jobs=jobs;this.configs=configs;this.identity=identity;this.mapper=mapper;this.audit=audit;this.retention=retention;this.storageVersions=storageVersions;this.objects=objects;this.completion=completion;this.leases=leases;this.processing=processing;}
+ public JobService(JobRepository jobs,ConfigurationRepository configs,DevelopmentIdentity identity,ObjectMapper mapper,AuditService audit,StorageRepository retention,StorageVersionRepository storageVersions,PrivateObjectStorage objects,JobCompletion completion,JobLeases leases,ProcessingRepository processing,SigningChoices choices,WorkerExecution execution,TrustPolicy trust,PrivateTimestamps timestamps,RemoteWorkerSettingsRepository remoteSettings){this.remoteSettings=remoteSettings;this.timestamps=timestamps;this.trust=trust;this.execution=execution;this.choices=choices;this.jobs=jobs;this.configs=configs;this.identity=identity;this.mapper=mapper;this.audit=audit;this.retention=retention;this.storageVersions=storageVersions;this.objects=objects;this.completion=completion;this.leases=leases;this.processing=processing;}
  public Path directory(String id){UUID.fromString(id);return storage.resolve(id);}
  public synchronized SigningJob submit(MultipartFile file,String creator,String title,String ai,String owner,String requestId,Long expectedProfileRevision,String expectedIdentityFingerprint) throws Exception {
   return submit(file,creator,title,ai,owner,requestId,expectedProfileRevision,expectedIdentityFingerprint,null,null);
  }
  public synchronized SigningJob submit(MultipartFile file,String creator,String title,String ai,String owner,String requestId,Long expectedProfileRevision,String expectedIdentityFingerprint,String optionId,Long optionRevision) throws Exception {
+  return submit(file,creator,title,ai,owner,requestId,expectedProfileRevision,expectedIdentityFingerprint,optionId,optionRevision,null);
+ }
+ public synchronized SigningJob submit(MultipartFile file,String creator,String title,String ai,String owner,String requestId,Long expectedProfileRevision,String expectedIdentityFingerprint,String optionId,Long optionRevision,String remoteProbe)throws Exception {
   if(creator.isBlank() || creator.length()>120 || title.isBlank() || title.length()>200 || !Set.of("none","generated","edited","unspecified").contains(ai))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid public claims");
   if(!requestId.matches("[a-zA-Z0-9-]{1,80}"))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid request identifier");
   String requestKey=WorkspaceContext.id()+":"+owner+":"+requestId;
@@ -40,6 +43,8 @@ public class JobService {
   String format=ContentFormats.detect(file);
   if(format==null || !settings.formats().contains(format))throw new ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE,"Unsupported or disabled format");
   var material=selected.material();if(!Objects.equals(expectedProfileRevision,selected.profileRevision()) || !Objects.equals(expectedIdentityFingerprint,material.fingerprint()))throw new ResponseStatusException(HttpStatus.CONFLICT,"Profile or identity changed; reload and review public claims again");SigningJob job=new SigningJob();job.id=UUID.randomUUID().toString();job.owner=owner;job.workspaceId=WorkspaceContext.id();job.requestKey=requestKey;job.requestDigest=requestDigest;job.state="QUEUED";job.format=format;job.title=title;job.fingerprint=material.fingerprint();job.certificatePath=material.certificate().toString();job.keyPath=material.key().toString();job.createdAt=Instant.now();
+  job.remoteQueued=remoteProbe!=null || remoteSettings.findById(job.workspaceId).map(r->r.remoteQueuedSigning).orElse(false);job.remoteTarget=remoteProbe;
+  if(job.remoteQueued && !job.keyPath.startsWith("pkcs11:"))throw new ResponseStatusException(HttpStatus.CONFLICT,"Remote queued signing requires a hardware signing choice");
   Files.createDirectories(storage);Files.setPosixFilePermissions(storage,java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
   Path directory=directory(job.id);Files.createDirectory(directory,java.nio.file.attribute.PosixFilePermissions.asFileAttribute(java.nio.file.attribute.PosixFilePermissions.fromString("rwx------")));
   try {
@@ -49,6 +54,8 @@ public class JobService {
    if(activeStorage!=null)job.storageSnapshot=storageVersions.findById(activeStorage).filter(v->v.workspaceId.equals(job.workspaceId)).orElseThrow().configuration;
    file.transferTo(directory.resolve("original"+extension(job)));
    var data=new LinkedHashMap<String,Object>(Map.of("creator",creator,"organization",settings.organizationName(),"profile",settings.profileName(),"configurationRevision",selected.profileRevision(),"aiDisclosure",ai,"source","user-declared","developmentIdentity",material.development()));
+   data.put("title",title);data.put("contentFormat",format);
+   data.put("jobId",job.id);data.put("sourceSha256",contentHash);
    if(job.timestampSnapshot!=null)data.put("privateTimestampVersion",mapper.readTree(job.timestampSnapshot).path("versionId").asText());
    if(job.trustSnapshot!=null)data.put("privateTrustPolicyVersion",mapper.readTree(job.trustSnapshot).path("versionId").asText());
    if(selected.optionId()!=null){data.put("signingChoiceId",selected.optionId());data.put("signingChoiceRevision",selected.optionRevision());}
@@ -60,7 +67,7 @@ public class JobService {
  public String extension(SigningJob job){return ContentFormats.extension(job.format);}
  @EventListener(ApplicationReadyEvent.class) @Scheduled(cron="${portal.jobs.recovery.schedule:*/10 * * * * *}") public void recover(){for(var job:jobs.findByStateOrderByCreatedAtAsc("RUNNING",PageRequest.of(0,10000)))leases.recover(job.id);}
  @Scheduled(cron="${portal.jobs.schedule:*/1 * * * * *}") public void process() {
-  var pending=jobs.findByStateOrderByCreatedAtAsc("QUEUED",PageRequest.of(0,1));if(pending.isEmpty())return;
+  var pending=jobs.findByStateAndRemoteQueuedFalseOrderByCreatedAtAsc("QUEUED",PageRequest.of(0,1));if(pending.isEmpty())return;
   var claimed=leases.claim(pending.getFirst().id);if(claimed.isEmpty())return;var job=claimed.get();job.resultAttempt=job.leaseToken;Path source=directory(job.id),directory=source.resolve("attempts").resolve(job.resultAttempt);Process process=null;
   try {
    Files.createDirectories(directory);Path output=directory.resolve("signed"+extension(job));

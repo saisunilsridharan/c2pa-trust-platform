@@ -20,24 +20,32 @@ import java.util.concurrent.atomic.AtomicReference;
   return sign(workspace,worker,input,output,manifest,certificate,key,report,error,timeout,trustSnapshot,timestampSnapshot,sandbox.current(workspace));
  }
  public int sign(Long workspace,Path worker,Path input,Path output,Path manifest,Path certificate,String key,Path report,Path error,int timeout,String trustSnapshot,String timestampSnapshot,WorkerSandbox.Budget budget)throws Exception {
-  revocations.enforce(workspace,certificate);
+  return signInternal(workspace,worker,input,output,manifest,certificate,key,report,error,timeout,trustSnapshot,timestampSnapshot,budget,null,null);
+ }
+ @FunctionalInterface public interface RemoteCallback {byte[] invoke(int operation,byte[] input)throws Exception;}
+ public int signRemote(Long workspace,Path worker,Path input,Path output,Path manifest,Path certificate,Path report,Path error,int timeout,String policy,boolean timestamp,WorkerSandbox.Budget budget,RemoteCallback callback)throws Exception{
+  return signInternal(workspace,worker,input,output,manifest,certificate,"pkcs11:remote",report,error,timeout,null,timestamp?"REMOTE":null,budget,Objects.requireNonNull(callback),policy);
+ }
+ private int signInternal(Long workspace,Path worker,Path input,Path output,Path manifest,Path certificate,String key,Path report,Path error,int timeout,String trustSnapshot,String timestampSnapshot,WorkerSandbox.Budget budget,RemoteCallback callback,String preparedPolicy)throws Exception {
+  if(callback==null)revocations.enforce(workspace,certificate);
   Process process=null;Path bridge=null;ServerSocketChannel server=null;AtomicReference<SocketChannel> peer=new AtomicReference<>();Thread handler=null;
   try{
    bridge=Files.createTempDirectory("c2pa-worker-private-");Files.setPosixFilePermissions(bridge,java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
    Path stagedDirectory=Files.createDirectory(bridge.resolve("output"));Path staged=stagedDirectory.resolve(output.getFileName());
    List<String> command=new ArrayList<>(List.of(worker.toString(),"sign",input.toString(),staged.toString(),manifest.toString(),certificate.toString(),key));
    if(key.startsWith("pkcs11:") || timestampSnapshot!=null){
-    String identity=key.startsWith("pkcs11:")?key.substring(7):null;if(identity!=null)hardware.get(identity,workspace);
+    String identity=key.startsWith("pkcs11:")?key.substring(7):null;if(identity!=null && callback==null)hardware.get(identity,workspace);
     Path socket=bridge.resolve("sign.sock");server=ServerSocketChannel.open(StandardProtocolFamily.UNIX);server.bind(UnixDomainSocketAddress.of(socket));
     var receiver=server;handler=Thread.ofVirtual().start(()->{
-     try{for(int i=0;i<4;i++){try(var connection=receiver.accept()){peer.set(connection);var in=new DataInputStream(Channels.newInputStream(connection));int operation=in.readUnsignedByte();int size=in.readInt();if(size<1 || size>65536)throw new IOException();byte[] data=in.readNBytes(size);if(data.length!=size)throw new IOException();byte[] signature;if(operation==1 && identity!=null){revocations.enforce(workspace,certificate);signature=hardware.sign(identity,workspace,data);}else if(operation==2 && timestampSnapshot!=null)signature=timestamps.submit(workspace,timestampSnapshot,data);else throw new IOException();var out=new DataOutputStream(Channels.newOutputStream(connection));out.writeInt(signature.length);out.write(signature);out.flush();}finally{peer.set(null);}}}catch(Exception ignored){}
+     try{for(int i=0;i<4;i++){try(var connection=receiver.accept()){peer.set(connection);var in=new DataInputStream(Channels.newInputStream(connection));int operation=in.readUnsignedByte();int size=in.readInt();if(size<1 || size>65536)throw new IOException();byte[] data=in.readNBytes(size);if(data.length!=size)throw new IOException();byte[] signature;if(callback!=null){if(operation!=1 && (operation!=2 || timestampSnapshot==null))throw new IOException();signature=callback.invoke(operation,data);}else if(operation==1 && identity!=null){revocations.enforce(workspace,certificate);signature=hardware.sign(identity,workspace,data);}else if(operation==2 && timestampSnapshot!=null)signature=timestamps.submit(workspace,timestampSnapshot,data);else throw new IOException();var out=new DataOutputStream(Channels.newOutputStream(connection));out.writeInt(signature.length);out.write(signature);out.flush();}finally{peer.set(null);}}}catch(Exception ignored){}
     });
     if(identity!=null){command.set(1,"sign-pkcs11");command.set(6,socket.toString());}
-    if(timestampSnapshot!=null){Path policy=bridge.resolve("trust-policy.json");Files.writeString(policy,trust.workerConfiguration(trustSnapshot,timestampSnapshot));command.add(policy.toString());command.add(socket.toString());}
+    if(timestampSnapshot!=null){Path policy=bridge.resolve("trust-policy.json");Files.writeString(policy,callback==null?trust.workerConfiguration(trustSnapshot,timestampSnapshot):preparedPolicy);command.add(policy.toString());command.add(socket.toString());}
    }
    if(trustSnapshot!=null && timestampSnapshot==null){Path policy=bridge.resolve("trust-policy.json");Files.writeString(policy,trust.workerConfiguration(trustSnapshot));command.add(policy.toString());}
+   if(callback!=null && preparedPolicy!=null && timestampSnapshot==null){Path policy=bridge.resolve("trust-policy.json");Files.writeString(policy,preparedPolicy);command.add(policy.toString());}
    process=sandbox.process(command,budget).redirectOutput(report.toFile()).redirectError(error.toFile()).start();
-   if(!process.waitFor(timeout,TimeUnit.SECONDS))throw new IOException("Signing timed out");if(process.exitValue()==0 && Files.size(report)>8*1024*1024L){Files.deleteIfExists(output);throw new IOException("Report exceeds limit");}if(process.exitValue()==0){revocations.enforce(workspace,certificate);if(!Files.isRegularFile(staged,LinkOption.NOFOLLOW_LINKS))throw new IOException("Signed output is not a regular file");Files.move(staged,output,StandardCopyOption.REPLACE_EXISTING);}return process.exitValue();
+   if(!process.waitFor(timeout,TimeUnit.SECONDS))throw new IOException("Signing timed out");if(process.exitValue()==0 && Files.size(report)>8*1024*1024L){Files.deleteIfExists(output);throw new IOException("Report exceeds limit");}if(process.exitValue()==0){if(callback==null)revocations.enforce(workspace,certificate);if(!Files.isRegularFile(staged,LinkOption.NOFOLLOW_LINKS))throw new IOException("Signed output is not a regular file");Files.move(staged,output,StandardCopyOption.REPLACE_EXISTING);}return process.exitValue();
   }finally{
    if(process!=null && process.isAlive()){process.destroyForcibly();process.waitFor(5,TimeUnit.SECONDS);}
    if(server!=null)server.close();var connection=peer.get();if(connection!=null)connection.close();if(handler!=null)handler.join(20000);
@@ -45,10 +53,13 @@ import java.util.concurrent.atomic.AtomicReference;
   }
  }
  public int inspect(Long workspace,Path worker,Path input,String configuration,Path report,Path error,int timeout)throws Exception{
+  return inspect(workspace,worker,input,configuration,report,error,timeout,sandbox.current(workspace));
+ }
+ public int inspect(Long workspace,Path worker,Path input,String configuration,Path report,Path error,int timeout,WorkerSandbox.Budget budget)throws Exception{
   Process process=null;Path scratch=Files.createTempDirectory("c2pa-inspection-private-");
   try{
    var command=new ArrayList<String>();if(configuration==null)command.addAll(List.of(worker.toString(),input.toString()));else{Path policy=scratch.resolve("policy.json");Files.writeString(policy,configuration);command.addAll(List.of(worker.toString(),"inspect",input.toString(),policy.toString()));}
-   process=sandbox.process(command,sandbox.current(workspace)).redirectOutput(report.toFile()).redirectError(error.toFile()).start();if(!process.waitFor(timeout,TimeUnit.SECONDS))throw new IOException("Inspection timed out");return process.exitValue();
+   process=sandbox.process(command,budget).redirectOutput(report.toFile()).redirectError(error.toFile()).start();if(!process.waitFor(timeout,TimeUnit.SECONDS))throw new IOException("Inspection timed out");return process.exitValue();
   }finally{if(process!=null && process.isAlive()){process.destroyForcibly();process.waitFor(5,TimeUnit.SECONDS);}try(var files=Files.list(scratch)){for(var file:files.toList())Files.deleteIfExists(file);}Files.deleteIfExists(scratch);}
  }
 

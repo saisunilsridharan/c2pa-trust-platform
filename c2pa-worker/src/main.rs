@@ -119,7 +119,7 @@ fn execute() -> Result<(), Box<dyn std::error::Error>> {
 fn build_context(
     path: Option<&String>,
 ) -> Result<(c2pa::Context, Option<serde_json::Value>), Box<dyn std::error::Error>> {
-    let baseline = serde_json::json!({"core":{"allowed_network_hosts":[],"allow_redirects":false},"verify":{"ocsp_fetch":false,"remote_manifest_fetch":false}});
+    let baseline = serde_json::json!({"trust":{"trust_config":"1.3.6.1.4.1.62558.2.1"},"core":{"allowed_network_hosts":[],"allow_redirects":false},"verify":{"ocsp_fetch":false,"remote_manifest_fetch":false}});
     let context = c2pa::Context::new().with_settings(baseline)?;
     if let Some(path) = path {
         let policy: serde_json::Value = serde_json::from_slice(&std::fs::read(path)?)?;
@@ -134,6 +134,11 @@ fn report(
     policy: Option<serde_json::Value>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut result: serde_json::Value = serde_json::from_str(&reader.json())?;
+    if let Some(manifest) = reader.active_manifest() {
+        if let Some(signature) = manifest.signature_info() {
+            result["portal_signing_certificate_chain"] = serde_json::json!(signature.cert_chain());
+        }
+    }
     if let Some(policy) = policy {
         result["portal_trust_policy"] = serde_json::json!({"versionId":policy["versionId"],"source":policy["source"],"requireTrustedSigning":policy["requireTrusted"],"publicTrustVerified":false,"timestampVersionId":policy["timestampVersionId"],"privateTimestampRequired":policy["requireTimestamp"],"privateTimestampTrusted":timestamp_trusted(reader)?});
     }

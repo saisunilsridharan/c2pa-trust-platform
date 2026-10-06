@@ -29,6 +29,7 @@ public class AdminAuthentication extends OncePerRequestFilter {
  @Override protected void doFilterInternal(HttpServletRequest request,HttpServletResponse response,FilterChain chain) throws ServletException,IOException {
   String rawPath=request.getServletPath();if(rawPath.isEmpty())rawPath=request.getRequestURI();
   String path=rawPath.replaceAll(";[^/]*", "").replaceAll("/+", "/");
+  if(path.startsWith("/api/v1/worker-protocol/") && request.getAttribute("portal.workerId") instanceof String){chain.doFilter(request,response);return;}
   if(!path.startsWith("/api/") || path.equals("/api/v1/health") || path.equals("/api/v1/auth/status") || path.equals("/api/v1/auth/login") || path.equals("/api/v1/auth/recovery") || java.util.Set.of("/api/v1/auth/oidc/status","/api/v1/auth/oidc/start","/api/v1/auth/oidc/complete").contains(path)){chain.doFilter(request,response);return;}
   String supplied=request.getHeader("X-Admin-Token");
   String authorization=request.getHeader("Authorization");

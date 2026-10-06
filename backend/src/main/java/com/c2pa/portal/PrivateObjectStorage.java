@@ -29,6 +29,7 @@ public class PrivateObjectStorage {
  }
  public static javax.net.ssl.TrustManager[] trust(String pem)throws Exception {
   if(pem==null || pem.isBlank())return null;
+  if(!pem.matches("(?s)(?:\\s*-----BEGIN CERTIFICATE-----[A-Za-z0-9+/=\\s]+-----END CERTIFICATE-----\\s*)+"))throw new IllegalArgumentException("TLS trust accepts public certificate PEM blocks only");
   var certificates=java.security.cert.CertificateFactory.getInstance("X.509").generateCertificates(new java.io.ByteArrayInputStream(pem.getBytes(StandardCharsets.US_ASCII)));
   if(certificates.isEmpty())throw new IllegalArgumentException("Empty CA bundle");
   var store=java.security.KeyStore.getInstance(java.security.KeyStore.getDefaultType());store.load(null);

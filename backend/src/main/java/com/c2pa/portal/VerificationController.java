@@ -15,10 +15,10 @@ import java.util.concurrent.TimeUnit;
 @RequestMapping("/api/v1/verification")
 @SecurityRequirement(name="adminToken")
 public class VerificationController {
- private final WorkerExecution execution;private final PrivateTimestamps timestamps;private final TrustPolicy trust;private final ConfigurationRepository repository;
+ private final OfficialPublicTrust publicTrust;private final WorkerExecution execution;private final PrivateTimestamps timestamps;private final TrustPolicy trust;private final ConfigurationRepository repository;
  private final ObjectMapper mapper;
  private final AuditService audit;
- public VerificationController(ConfigurationRepository repository,ObjectMapper mapper,AuditService audit,TrustPolicy trust,PrivateTimestamps timestamps,WorkerExecution execution) {this.execution=execution;this.timestamps=timestamps;
+ public VerificationController(ConfigurationRepository repository,ObjectMapper mapper,AuditService audit,TrustPolicy trust,PrivateTimestamps timestamps,WorkerExecution execution,OfficialPublicTrust publicTrust) {this.publicTrust=publicTrust;this.execution=execution;this.timestamps=timestamps;
   this.trust=trust;
   this.repository=repository; this.mapper=mapper;this.audit=audit;
  }
@@ -45,6 +45,7 @@ public class VerificationController {
    if(result!=0)throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"No readable C2PA manifest, malformed content, or processing limit exceeded");
    if(Files.size(output)>8*1024*1024) throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"Manifest report exceeds limits");
    JsonNode report=mapper.readTree(output.toFile());
+   ((com.fasterxml.jackson.databind.node.ObjectNode)report).set("portal_public_trust",publicTrust.evaluateActive(WorkspaceContext.id(),input,directory));
    audit.record("CONTENT_INSPECTED",report.path("validation_state").asText("unknown"));
    return report;
   } finally {

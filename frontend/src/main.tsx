@@ -1,4 +1,7 @@
 import RevocationPanel from "./RevocationPanel";
+import RemoteWorkersPanel from "./RemoteWorkersPanel";
+import PublicTrustPanel from "./PublicTrustPanel";
+import InspectionTrustSummary from "./InspectionTrustSummary";
 import CertificateRenewalPanel from "./CertificateRenewalPanel";
 import PrivateCaPanel from "./PrivateCaPanel";
 import { authenticationRetry } from "./authenticationRetry";
@@ -483,12 +486,14 @@ function App() {
                   <StorageProvidersPanel token={token} />
                   <WebhooksPanel token={token} />
                   <ProcessingPanel token={token} />
+                  <RemoteWorkersPanel token={token} />
                   <TimestampsPanel token={token} />
                   <PrivateCaPanel token={token} />
                   <CertificateRenewalPanel token={token} />
                   <AuditStoragePanel token={token} />
                   <TrustPolicyPanel token={token} />
                   <RevocationPanel token={token} />
+                  <PublicTrustPanel token={token} />
                   <HardwareIdentitiesPanel
                     token={token}
                     profileRevision={state.activeRevision}
@@ -586,7 +591,7 @@ function App() {
                   Inspect manifest
                 </button>
                 {report !== null && (
-                  <pre>{JSON.stringify(report, null, 2)}</pre>
+                  <><InspectionTrustSummary report={report} /><pre>{JSON.stringify(report, null, 2)}</pre></>
                 )}
               </section>
               {user?.id != null && (

@@ -48,3 +48,22 @@ are supplied by `prlimit`.
 Acceptance against real providers requires their actual endpoints and credentials.
 Remote deployment requires reachable SSH or another authorized deployment channel.
 A local build does not establish either condition.
+
+
+## Separate remote worker hosts
+
+Deploy the API/web pair on each trusted agent host with a separate database and
+persistent volume. Do not share hub encryption keys or copy HSM PINs to agents.
+Use the hub Remote workers UI to create an expiring pairing credential; enter it
+as an encrypted credential in the agent UI with the hub HTTPS URL and optional
+public TLS CA. Test/start the agent, run the hub hardware probe, activate the
+connection, and enable hardware-only queued routing. Keep the hub reachable from
+agents and retain native resource/isolation prerequisites on each host. Agent
+hosts are trusted members of the signing boundary. Revocation/rotation invalidates
+old credentials and in-flight publication authority.
+
+Official public inspection also uses UI settings. Allow verified HTTPS access to
+raw.githubusercontent.com for the fixed C2PA conformance lists, or configure a
+trusted HTTP CONNECT proxy and public CA bundle through the UI. Fetch/test/activate
+the lists and refresh before their cache expiry. Public online revocation is not
+checked; this deployment does not claim product certification.

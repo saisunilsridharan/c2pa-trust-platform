@@ -230,7 +230,7 @@ def initialize_token(command, environment, so_pin, user_pin):
 def chunk(kind, data):
     return struct.pack('!I', len(data)) + kind + data + struct.pack('!I', zlib.crc32(kind + data))
 
-def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, formats=False, audit_lock=False, certificates=False, rate_limits=False, private_ca=False):
+def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, formats=False, audit_lock=False, certificates=False, rate_limits=False, private_ca=False, remote_workers=False, public_trust=False):
     global LOCK_MODE
     global TSA_MODE
     assert (ROOT / 'backend/target/portal-api-0.1.0.jar').is_file(), 'Build the Java API first'
@@ -904,6 +904,20 @@ def run(postgres_bin=None, softhsm_dir=None, timestamps=False, namespace=False, 
                     assert report['validation_state'] == 'Valid' and len(report['manifests']) >= 2, filename
                     assert helpers['decoded_content'](extension, resigned) == expected, filename + ' re-signing changed decoded content'
                     print(filename + ': signing, preserved provenance and independent decoded-content equality passed.', flush=True)
+            if remote_workers:
+                if not softhsm_dir: raise AssertionError('Remote worker smoke requires disposable hardware signing')
+                reviewed = next(c for c in call('/admin/signing-options') if c['id'] == choice['id'])
+                if not reviewed['enabled']:
+                    reviewed = call('/admin/signing-options/' + reviewed['id'], {'revision': reviewed['revision'], 'enabled': True}, method='PUT')
+                policy = call('/admin/trust-policy')
+                call('/admin/trust-policy/activate', {'revision': policy['revision'], 'versionId': policy_id, 'acknowledgePrivatePolicy': True})
+                if timestamps:
+                    tsa = call('/admin/timestamps')
+                    call('/admin/timestamps/activate', {'revision': tsa['revision'], 'versionId': timestamp_id, 'acknowledgePrivateTimestamp': True})
+                remote_fields = {**fields, 'expectedProfileRevision': reviewed['profileRevision'], 'expectedIdentityFingerprint': reviewed['fingerprint'], 'signingOptionId': reviewed['id'], 'signingOptionRevision': reviewed['revision']}
+                runpy.run_path(str(ROOT / 'scripts/smoke-remote-workers.py'))['run'](sandbox, fixture_jar, base, call, multipart, reviewed, remote_fields, png, namespace, workspace)
+            if public_trust:
+                runpy.run_path(str(ROOT / 'scripts/smoke-public-trust.py'))['run'](call, multipart, sample_signed, workspace)
             print(('PostgreSQL'  if postgres_bin else 'H2') + (': PKCS#11/non-exportable SoftHSM signing, ' if softhsm_dir else ': ') + ('RFC 3161 timestamps/snapshots, ' if timestamps else '') + 'worker resource limits/sandbox capability, private trust policy/snapshots, approved signing choices/rotation/withdrawal, MFA, one-time account recovery, migrations, leased native C2PA job, private storage, SigV4, scoped API-key signing/revocation, provider snapshots, notifications, HMAC webhooks, audit checkpoint, workspace isolation, restart persistence and encryption-key recovery passed.')
         finally:
             stop(); fixture.shutdown(); fixture.server_close()
@@ -927,5 +941,7 @@ if __name__ == '__main__':
     parser.add_argument('--certificates', action='store_true', help='Test token-signed CSR and immutable certificate renewal with an independent OpenSSL private CA')
     parser.add_argument('--rate-limits', action='store_true', help='Verify UI-configured shared authentication throttling and trusted-proxy policy')
     parser.add_argument('--private-ca', action='store_true', help='Verify connected Smallstep-compatible private CA issuance with an independent OpenSSL protocol fixture')
+    parser.add_argument('--remote-workers', action='store_true', help='Run two independent databases and UI-paired remote signing with hub-only HSM keys')
+    parser.add_argument('--public-trust', action='store_true', help='Fetch actual official signing/TSA sources through UI and reject private signers')
     args = parser.parse_args()
-    run(args.postgres_bin, args.softhsm_dir, args.timestamps, args.namespace, args.formats, args.audit_lock, args.certificates, args.rate_limits, args.private_ca)
+    run(args.postgres_bin, args.softhsm_dir, args.timestamps, args.namespace, args.formats, args.audit_lock, args.certificates, args.rate_limits, args.private_ca, args.remote_workers, args.public_trust)

@@ -17,7 +17,10 @@ public final class ContentFormats {
  public static String extension(String mime){return SUPPORTED.stream().filter(c->c.mime().equals(mime)).findFirst().orElseThrow().extension();}
  private static boolean at(byte[] bytes,int offset,String value){byte[] expected=value.getBytes(StandardCharsets.ISO_8859_1);return bytes.length>=offset+expected.length && Arrays.equals(bytes,offset,offset+expected.length,expected,0,expected.length);}
  public static String detect(MultipartFile file)throws java.io.IOException{
-  byte[] h;try(var stream=file.getInputStream()){h=stream.readNBytes(32);}
+  byte[] h;try(var stream=file.getInputStream()){h=stream.readNBytes(32);}return detect(h);
+ }
+ public static String detect(java.nio.file.Path file)throws java.io.IOException{try(var stream=java.nio.file.Files.newInputStream(file)){return detect(stream.readNBytes(32));}}
+ private static String detect(byte[] h){
   if(h.length>=3 && (h[0]&255)==255 && (h[1]&255)==216 && (h[2]&255)==255)return "image/jpeg";
   if(at(h,0,"\u0089PNG\r\n\u001a\n"))return "image/png";
   if(at(h,0,"RIFF") && at(h,8,"WAVE"))return "audio/wav";
