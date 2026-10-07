@@ -178,13 +178,16 @@ export default function AdministrationPanel({
         <p>Loading status…</p>
       )}
       <h3>Import a private CA identity</h3>
-      <p>
-        Upload a password-protected PKCS#12 bundle containing one EC P-256
-        signing key and its C2PA-compatible certificate chain. A signing test
-        must pass before activation. The key is stored in an owner-only local
-        file; this provider has no HSM protection or trusted timestamp. Use a
-        private connection or HTTPS.
-      </p>
+      <details className="help-details">
+        <summary>More info</summary>
+        <p>
+          Upload a password-protected PKCS#12 bundle containing one EC P-256
+          signing key and its C2PA-compatible certificate chain. A signing test
+          must pass before activation. The key is stored in an owner-only local
+          file; this provider has no HSM protection or trusted timestamp. Use a
+          private connection or HTTPS.
+        </p>
+      </details>
       <label>
         PKCS#12 bundle (up to 1 MiB)
         <input

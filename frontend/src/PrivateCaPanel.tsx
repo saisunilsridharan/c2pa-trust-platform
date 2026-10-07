@@ -150,20 +150,26 @@ export default function PrivateCaPanel({ token }: { token: string }) {
   return (
     <section>
       <h2>Private CA issuance</h2>
-      <p>
-        This connector uses Smallstep-compatible /sign requests with an
-        encrypted ES256 JWK provisioner credential. It creates a token-signed
-        CSR, requests a certificate and verifies its key, subject, DNS name,
-        validity and configured CA chain before an actual C2PA signing test.
-        Test requests also issue real certificate drafts.
-      </p>
-      <p>
-        Your CA provisioner needs a C2PA signing template with
-        digital-signature, C2PA and email-protection usage. The default
-        web-server template does not meet this requirement. Requests use a
-        DNS-style common name, such as signer.portal.internal. Issuance trust is
-        separate from workspace signing trust and public trust.
-      </p>
+      <details className="help-details">
+        <summary>More info</summary>
+        <p>
+          This connector uses Smallstep-compatible /sign requests with an
+          encrypted ES256 JWK provisioner credential. It creates a token-signed
+          CSR, requests a certificate and verifies its key, subject, DNS name,
+          validity and configured CA chain before an actual C2PA signing test.
+          Test requests also issue real certificate drafts.
+        </p>
+      </details>
+      <details className="help-details">
+        <summary>More info</summary>
+        <p>
+          Your CA provisioner needs a C2PA signing template with
+          digital-signature, C2PA and email-protection usage. The default
+          web-server template does not meet this requirement. Requests use a
+          DNS-style common name, such as signer.portal.internal. Issuance trust
+          is separate from workspace signing trust and public trust.
+        </p>
+      </details>
       <label>
         <input
           type="checkbox"

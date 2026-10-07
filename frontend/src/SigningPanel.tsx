@@ -55,24 +55,28 @@ export default function SigningPanel({
   }
   return (
     <section>
-      <h2>Sign content</h2>
-      <TrustPolicyStatus token={token} />
-      <RevocationStatus token={token} />
-      <TimestampStatus token={token} />
+      <div className="step-heading">
+        <span>1</span>
+        <h2>Choose a signer</h2>
+      </div>
+      <details className="help-details">
+        <summary>Signing checks</summary>
+        <TrustPolicyStatus token={token} />
+        <RevocationStatus token={token} />
+        <TimestampStatus token={token} />
+      </details>
       <SigningChoiceSelector
         token={token}
         value={choice}
         onChange={setChoice}
       />
       <div className="notice">
-        Public trust has not been verified for the active identity. Private
-        timestamping depends on the active provider policy. Your declarations
-        will be embedded publicly.
+        Public trust is not verified here. The details you enter will be public.
       </div>
-      {!canConfigure && !available && (
+      {!canConfigure && !(choice ? choice.available : available) && (
         <p>An administrator must configure the signing identity.</p>
       )}
-      {!available ? (
+      {!(choice ? choice.available : available) && canConfigure ? (
         <>
           <label className="check">
             <input
@@ -83,6 +87,7 @@ export default function SigningPanel({
             I understand this identity is for development only.
           </label>
           <button
+            className="secondary"
             disabled={busy || !ack || !canConfigure}
             onClick={() =>
               run(async () => {
@@ -112,17 +117,19 @@ export default function SigningPanel({
               })
             }
           >
-            Create development identity
+            Create test signer
           </button>
         </>
-      ) : (
-        <p>
-          Signing identity configured. Its private key stays on the backend.
-        </p>
-      )}
+      ) : (choice ? choice.available : available) ? (
+        <p>Signer ready.</p>
+      ) : null}
       {!active && <p>Activate a profile before signing.</p>}
+      <div className="step-heading">
+        <span>2</span>
+        <h2>Add your file</h2>
+      </div>
       <label>
-        Content file
+        File
         <input
           type="file"
           accept={active?.formats.join(",")}
@@ -133,7 +140,7 @@ export default function SigningPanel({
         />
       </label>
       <label>
-        Content title
+        Title
         <input
           maxLength={200}
           value={title}
@@ -144,7 +151,7 @@ export default function SigningPanel({
         />
       </label>
       <label>
-        Creator attribution
+        Creator
         <input
           maxLength={120}
           value={creator}
@@ -155,7 +162,7 @@ export default function SigningPanel({
         />
       </label>
       <label>
-        AI disclosure
+        Was AI used?
         <select
           value={ai}
           onChange={(e) => {
@@ -163,18 +170,22 @@ export default function SigningPanel({
             setReviewed(false);
           }}
         >
-          <option value="unspecified">Unspecified</option>
-          <option value="none">No AI use declared</option>
-          <option value="generated">AI generated</option>
-          <option value="edited">AI edited</option>
+          <option value="unspecified">Choose an answer</option>
+          <option value="none">No</option>
+          <option value="generated">Made with AI</option>
+          <option value="edited">Edited with AI</option>
         </select>
       </label>
+      <div className="step-heading">
+        <span>3</span>
+        <h2>Check and sign</h2>
+      </div>
       <p>
-        Public claims: <strong>{title || "Title required"}</strong> · creator{" "}
+        Public details: <strong>{title || "Title required"}</strong> · creator{" "}
         {creator || "required"} ·{" "}
         {active?.organizationName || "organization pending"} · profile{" "}
-        {active?.profileName || "pending"} · AI disclosure {ai}. These are user
-        declarations. Existing provenance is retained as an ingredient.
+        {active?.profileName || "pending"} · AI disclosure {ai}. These details
+        are your statements. The file’s earlier history is kept.
       </p>
       <label className="check">
         <input
@@ -182,7 +193,7 @@ export default function SigningPanel({
           checked={reviewed}
           onChange={(e) => setReviewed(e.target.checked)}
         />
-        I reviewed these public claims and authorize signing.
+        I checked these details and agree to sign.
       </label>
       <button
         disabled={
@@ -232,7 +243,7 @@ export default function SigningPanel({
             link.click();
             setTimeout(() => URL.revokeObjectURL(url), 1000);
             setMessage(
-              "Signed file downloaded. Inspect it to review integrity and signer trust.",
+              "Your signed file is downloaded. Use Verify to check it.",
             );
           })
         }

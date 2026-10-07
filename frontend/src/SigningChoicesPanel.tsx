@@ -82,16 +82,16 @@ export function SigningChoiceSelector({
       </label>
       <div className="actions">
         <button disabled={!page} onClick={() => setPage(page - 1)}>
-          Previous choices
+          Back
         </button>
         <button
           disabled={choices.length < 50}
           onClick={() => setPage(page + 1)}
         >
-          Next choices
+          Next
         </button>
         <button onClick={() => load().catch((e) => setMessage(e.message))}>
-          Refresh choices
+          Refresh
         </button>
       </div>
       {value && (
@@ -170,13 +170,16 @@ export default function SigningChoicesPanel({
   return (
     <section>
       <h2>Approved signing choices</h2>
-      <p>
-        Publish the current active profile and certificate as a named choice.
-        Activate another profile or import/rotate its certificate, then publish
-        another choice. Users can select any enabled choice. Published claims
-        and certificate references stay fixed; later changes to the workspace
-        default affect future default jobs.
-      </p>
+      <details className="help-details">
+        <summary>More info</summary>
+        <p>
+          Publish the current active profile and certificate as a named choice.
+          Activate another profile or import/rotate its certificate, then
+          publish another choice. Users can select any enabled choice. Published
+          claims and certificate references stay fixed; later changes to the
+          workspace default affect future default jobs.
+        </p>
+      </details>
       <p>
         Current profile revision: {profileRevision ?? "unconfigured"}.
         Certificate: <code>{fingerprint ?? "unconfigured"}</code>.
@@ -227,7 +230,7 @@ export default function SigningChoicesPanel({
         Publish signing choice
       </button>
       <button disabled={busy} onClick={() => run(load)}>
-        Refresh choices
+        Refresh
       </button>
       <div className="table-wrap">
         <table>
@@ -286,13 +289,13 @@ export default function SigningChoicesPanel({
       </div>
       <div className="actions">
         <button disabled={busy || !page} onClick={() => setPage(page - 1)}>
-          Previous choices
+          Back
         </button>
         <button
           disabled={busy || choices.length < 50}
           onClick={() => setPage(page + 1)}
         >
-          Next choices
+          Next
         </button>
       </div>
       <p role="status">{busy ? "Updating choices…" : message}</p>

@@ -94,13 +94,16 @@ export default function CertificateRenewalPanel({ token }: { token: string }) {
   return (
     <section className="card">
       <h2>Scheduled certificate renewal</h2>
-      <p>
-        Choose an approved hardware identity and active private issuer. Tested
-        replacements keep the reviewed profile and hardware key. The preceding
-        choice is withdrawn for future signing; existing jobs retain their
-        certificates. Changing the issuer or withdrawing a choice blocks its
-        plan.
-      </p>
+      <details className="help-details">
+        <summary>More info</summary>
+        <p>
+          Choose an approved hardware identity and active private issuer. Tested
+          replacements keep the reviewed profile and hardware key. The preceding
+          choice is withdrawn for future signing; existing jobs retain their
+          certificates. Changing the issuer or withdrawing a choice blocks its
+          plan.
+        </p>
+      </details>
       <p>
         Active issuer version: {provider || "Activate a tested issuer first"}
       </p>
@@ -121,13 +124,13 @@ export default function CertificateRenewalPanel({ token }: { token: string }) {
         disabled={busy || choicePage === 0}
         onClick={() => setChoicePage(choicePage - 1)}
       >
-        Previous choices
+        Back
       </button>
       <button
         disabled={busy || choices.length < 50}
         onClick={() => setChoicePage(choicePage + 1)}
       >
-        Next choices
+        Next
       </button>
       <label>
         Certificate DNS common name

@@ -71,12 +71,15 @@ export default function SecondFactorPanel({
         key:{" "}
         {status?.accountRecoveryConfigured ? "configured" : "not configured"}.
       </p>
-      <p>
-        Keep recovery credentials offline. Enabling or disabling MFA revokes
-        existing sessions and API keys. A recovery key replaces a forgotten
-        password; when MFA is enabled, an authenticator or unused backup code is
-        also required.
-      </p>
+      <details className="help-details">
+        <summary>More info</summary>
+        <p>
+          Keep recovery credentials offline. Enabling or disabling MFA revokes
+          existing sessions and API keys. A recovery key replaces a forgotten
+          password; when MFA is enabled, an authenticator or unused backup code
+          is also required.
+        </p>
+      </details>
       {!needsLogin && (
         <>
           <label>

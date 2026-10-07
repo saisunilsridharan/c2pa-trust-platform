@@ -90,11 +90,14 @@ export default function CredentialsPanel({
   return (
     <section>
       <h2>Private-service credentials</h2>
-      <p>
-        Credential values are write-only and encrypted. Use saved credential IDs
-        when configuring a private-service integration. Saving a replacement
-        creates a new version for future configuration changes.
-      </p>
+      <details className="help-details">
+        <summary>More info</summary>
+        <p>
+          Credential values are write-only and encrypted. Use saved credential
+          IDs when configuring a private-service integration. Saving a
+          replacement creates a new version for future configuration changes.
+        </p>
+      </details>
       <label>
         Label
         <input

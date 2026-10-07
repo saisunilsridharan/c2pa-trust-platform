@@ -39,12 +39,15 @@ export default function AuditIntegrityPanel({ token }: { token: string }) {
   return (
     <section>
       <h2>Audit integrity & checkpoints</h2>
-      <p>
-        Audit records form a hash chain. Keep exported checkpoints outside the
-        portal and database backups. Comparing an earlier trusted checkpoint
-        detects a rewritten chain. Legacy imported events have no proof of their
-        state before import.
-      </p>
+      <details className="help-details">
+        <summary>More info</summary>
+        <p>
+          Audit records form a hash chain. Keep exported checkpoints outside the
+          portal and database backups. Comparing an earlier trusted checkpoint
+          detects a rewritten chain. Legacy imported events have no proof of
+          their state before import.
+        </p>
+      </details>
       <button
         disabled={busy}
         onClick={() =>

@@ -140,18 +140,25 @@ export default function AuditStoragePanel({ token }: { token: string }) {
   return (
     <section>
       <h2>Immutable audit storage</h2>
-      <p>
-        Store audit checkpoints in a separate private S3 bucket with versioning
-        and Object Lock enabled. Checkpoints use COMPLIANCE retention. Tests
-        also create retained objects that cannot be removed before their
-        retention date. Keep downloaded receipts outside this portal, and
-        administer the bucket independently of the application database.
-      </p>
-      <p>
-        The connection test checks the provider’s reported retention and refusal
-        to delete a protected version. Provider administration and physical
-        storage remain part of your trust policy.
-      </p>
+      <details className="help-details">
+        <summary>More info</summary>
+        <p>
+          Store audit checkpoints in a separate private S3 bucket with
+          versioning and Object Lock enabled. Checkpoints use COMPLIANCE
+          retention. Tests also create retained objects that cannot be removed
+          before their retention date. Keep downloaded receipts outside this
+          portal, and administer the bucket independently of the application
+          database.
+        </p>
+      </details>
+      <details className="help-details">
+        <summary>More info</summary>
+        <p>
+          The connection test checks the provider’s reported retention and
+          refusal to delete a protected version. Provider administration and
+          physical storage remain part of your trust policy.
+        </p>
+      </details>
       <label>
         <input
           type="checkbox"

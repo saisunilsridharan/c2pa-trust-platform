@@ -222,12 +222,15 @@ export default function UsersPanel({
       {!bootstrap && (
         <>
           <h3>Recover a local account</h3>
-          <p>
-            Set a temporary password and deliver it to the user through your
-            secure channel. All sessions are revoked and the user must choose a
-            new password before accessing content. Use Change your password for
-            your own account.
-          </p>
+          <details className="help-details">
+            <summary>More info</summary>
+            <p>
+              Set a temporary password and deliver it to the user through your
+              secure channel. All sessions are revoked and the user must choose
+              a new password before accessing content. Use Change your password
+              for your own account.
+            </p>
+          </details>
           <label>
             User
             <select

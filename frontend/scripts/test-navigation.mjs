@@ -19,7 +19,9 @@ await writeFile(
     },
   ).outputText,
 );
-const { allowedPages, pageFromPath } = await import(pathToFileURL(target));
+const { allowedPages, pageFromPath, sidebarPages } = await import(
+  pathToFileURL(target)
+);
 after(() => rm(directory, { recursive: true, force: true }));
 const account = {
   id: 1,
@@ -64,4 +66,21 @@ test("deep links and trailing slashes preserve page selection; unknown paths rem
   assert.equal(pageFromPath("/portal/public-trust/"), "public-trust");
   assert.equal(pageFromPath("/portal/unknown"), "unknown");
   assert.notEqual(pageFromPath("/not-a-page"), "dashboard");
+});
+
+test("simple sidebar prioritizes daily tasks and keeps advanced pages discoverable", () => {
+  assert.deepEqual(
+    sidebarPages({ ...account, role: "ADMIN" }).map((p) => p[0]),
+    [
+      "dashboard",
+      "sign",
+      "jobs",
+      "inspect",
+      "notifications",
+      "settings",
+      "account",
+    ],
+  );
+  assert(!sidebarPages(account).some((p) => p[0] === "settings"));
+  assert(ids({ ...account, role: "ADMIN" }).includes("public-trust"));
 });

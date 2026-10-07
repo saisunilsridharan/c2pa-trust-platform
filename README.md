@@ -302,3 +302,23 @@ browser storage. Open page search from the toolbar or with Ctrl/Command+K; filte
 permitted pages, navigate with arrow keys and Enter, or dismiss with Escape. Search
 uses the same role-aware page list as the sidebar. The native modal traps focus
 and restores focus when dismissed. Reduced-motion preferences are respected.
+
+### Simple user experience
+
+The primary menu is limited to Home, Sign, Files & jobs, Verify, Inbox,
+Settings and Account, with unavailable items removed for each role. Advanced
+pages retain their URLs and search access; Settings groups them into compact
+expandable sections. Account keeps personal security and workspace access
+separate. Icons always have short text labels or accessible names.
+
+Signing follows three sections: choose a signer, add a file, and check/sign.
+Public-detail confirmation and existing signing rules remain required. Long
+static explanations are available under More info; technical inspection JSON
+is collapsed behind Technical report. Required acknowledgments, errors and
+public-trust limitations stay visible. First-time login setup is also collapsed.
+
+Browser layout checks cover all 31 pages at 360, 768 and 1440 pixels with mock
+API bootstrap data and unavailable-provider states, including expanded help.
+These checks verify no document overflow or overlapping content buttons, settings
+discovery, short role-aware menus and signing review gating; they do not replace
+real-provider acceptance. Frontend tests now total 11.

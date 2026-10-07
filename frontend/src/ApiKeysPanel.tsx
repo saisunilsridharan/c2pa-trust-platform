@@ -66,12 +66,15 @@ export default function ApiKeysPanel({
   return (
     <section>
       <h2>Personal API keys</h2>
-      <p>
-        Keys belong to your selected workspace and have only the chosen
-        operations. They cannot administer the portal. Account and membership
-        permissions are checked on every request. Password changes and recovery
-        revoke your keys.
-      </p>
+      <details className="help-details">
+        <summary>More info</summary>
+        <p>
+          Keys belong to your selected workspace and have only the chosen
+          operations. They cannot administer the portal. Account and membership
+          permissions are checked on every request. Password changes and
+          recovery revoke your keys.
+        </p>
+      </details>
       <label>
         Key label
         <input

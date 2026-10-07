@@ -131,10 +131,13 @@ export default function JobsPanel({
   }
   return (
     <section>
-      <h2>Saved assets & signing jobs</h2>
-      <TrustPolicyStatus token={token} />
-      <RevocationStatus token={token} />
-      <TimestampStatus token={token} />
+      <h2>Files & jobs</h2>
+      <details className="help-details">
+        <summary>Signing checks</summary>
+        <TrustPolicyStatus token={token} />
+        <RevocationStatus token={token} />
+        <TimestampStatus token={token} />
+      </details>
       {admin && operations && (
         <p>
           Queue: {String(operations.queued)} waiting ·{" "}
@@ -145,9 +148,7 @@ export default function JobsPanel({
         </p>
       )}
       <p>
-        Originals and signed outputs are saved separately. Jobs keep their
-        reviewed claims and identity across configuration changes. This queue
-        runs on one application instance.
+        Your originals are kept. Download signed files or retry a failed job.
       </p>
       {canSign && (
         <>

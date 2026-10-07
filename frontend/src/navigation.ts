@@ -8,6 +8,8 @@ export type PortalAccount = {
 };
 export const pages: [string, string, string, string?][] = [
   ["dashboard", "Overview", "Dashboard"],
+  ["settings", "Configuration", "Settings", "admin"],
+  ["account", "My account", "Account", "account"],
   ["sign", "Content", "Sign content", "signer"],
   ["jobs", "Content", "Signing jobs"],
   ["inspect", "Content", "Verify content"],
@@ -54,4 +56,20 @@ export function pageFromPath(path: string) {
   return path === "/"
     ? "dashboard"
     : path.replace(/^\/portal\//, "").replace(/\/$/, "");
+}
+export function sidebarPages(user: PortalAccount | null) {
+  const order = [
+    "dashboard",
+    "sign",
+    "jobs",
+    "inspect",
+    "notifications",
+    "settings",
+    "account",
+  ];
+  const permitted = allowedPages(user);
+  return order.flatMap((id) => {
+    const page = permitted.find((p) => p[0] === id);
+    return page ? [page] : [];
+  });
 }

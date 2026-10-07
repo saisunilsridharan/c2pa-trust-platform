@@ -89,13 +89,16 @@ export default function HardwareIdentitiesPanel({
   return (
     <section>
       <h2>PKCS#11 signing identities</h2>
-      <p>
-        Use an existing token key and its matching EC P-256 C2PA certificate
-        chain. Install the vendor module and provision the token on the server
-        first. Configure the module, slot, alias, encrypted PIN credential and
-        certificate here. The key stays in the token. Public certificate trust
-        and timestamps require separate verification.
-      </p>
+      <details className="help-details">
+        <summary>More info</summary>
+        <p>
+          Use an existing token key and its matching EC P-256 C2PA certificate
+          chain. Install the vendor module and provision the token on the server
+          first. Configure the module, slot, alias, encrypted PIN credential and
+          certificate here. The key stays in the token. Public certificate trust
+          and timestamps require separate verification.
+        </p>
+      </details>
       <label>
         Installed PKCS#11 module (absolute path)
         <input
@@ -219,14 +222,18 @@ export default function HardwareIdentitiesPanel({
         Test token & C2PA signing
       </button>
       <h3>Certificate request and renewal</h3>
-      <p>
-        Generate a PKCS#10 request signed by the selected token key, then submit
-        it to your private CA. The request includes C2PA signing usage. The CA
-        determines certificate policy and issuance. Download requests before the
-        current certificate expires. A replacement chain creates a separate
-        identity version and must pass real C2PA signing before approval;
-        existing choices and queued jobs retain their original certificates.
-      </p>
+      <details className="help-details">
+        <summary>More info</summary>
+        <p>
+          Generate a PKCS#10 request signed by the selected token key, then
+          submit it to your private CA. The request includes C2PA signing usage.
+          The CA determines certificate policy and issuance. Download requests
+          before the current certificate expires. A replacement chain creates a
+          separate identity version and must pass real C2PA signing before
+          approval; existing choices and queued jobs retain their original
+          certificates.
+        </p>
+      </details>
       <label>
         Certificate common name
         <input

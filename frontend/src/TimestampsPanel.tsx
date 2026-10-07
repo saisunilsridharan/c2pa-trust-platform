@@ -101,13 +101,17 @@ export default function TimestampsPanel({ token }: { token: string }) {
   return (
     <section>
       <h2>Private trusted timestamps</h2>
-      <p>
-        RFC 3161 timestamps bind a signing time to the signature. This
-        configuration establishes trust under your private TSA anchors; it does
-        not establish public trust-list membership. Enabled timestamps are
-        required: unavailable, invalid or untrusted responses fail signing. Jobs
-        retain their captured TSA version and credential references.
-      </p>
+      <details className="help-details">
+        <summary>More info</summary>
+        <p>
+          RFC 3161 timestamps bind a signing time to the signature. This
+          configuration establishes trust under your private TSA anchors; it
+          does not establish public trust-list membership. Enabled timestamps
+          are required: unavailable, invalid or untrusted responses fail
+          signing. Jobs retain their captured TSA version and credential
+          references.
+        </p>
+      </details>
       <p>
         Active timestamping:{" "}
         {state?.active?.configuration.enabled ? "required" : "disabled"}.

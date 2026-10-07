@@ -1,6 +1,11 @@
 import { Icon, WorkspaceTools } from "./WorkspaceTools";
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { allowedPages, pageFromPath, type PortalAccount } from "./navigation";
+import {
+  allowedPages,
+  sidebarPages,
+  pageFromPath,
+  type PortalAccount,
+} from "./navigation";
 const RouteContext = createContext("dashboard");
 export function Page({
   id,
@@ -131,24 +136,39 @@ export function PortalShell({
                 WORKSPACE <strong>#{user.workspaceId}</strong>
               </div>
               <nav aria-label="Main navigation">
-                {[...new Set(visible.map((p) => p[1]))].map((group) => (
-                  <div className="nav-group" key={group}>
-                    <h2>{group}</h2>
-                    {visible
-                      .filter((p) => p[1] === group)
-                      .map((p) => (
-                        <div
-                          key={p[0]}
-                          className={
-                            route === p[0] ? "nav-item active" : "nav-item"
-                          }
-                          aria-current={route === p[0] ? "page" : undefined}
-                        >
-                          {link(p[0], p[2], true)}
-                        </div>
-                      ))}
-                  </div>
-                ))}
+                <div className="nav-group">
+                  <h2>Workspace</h2>
+                  {sidebarPages(user).map((p) => {
+                    const labels: Record<string, string> = {
+                      dashboard: "Home",
+                      sign: "Sign",
+                      jobs: "Files & jobs",
+                      inspect: "Verify",
+                      notifications: "Inbox",
+                      settings: "Settings",
+                      account: "Account",
+                    };
+                    const selected =
+                      route === p[0] ||
+                      (p[0] === "settings" &&
+                        current &&
+                        !["Overview", "Content", "My account"].includes(
+                          current[1],
+                        ) &&
+                        route !== "workspaces") ||
+                      (p[0] === "account" &&
+                        (current?.[1] === "My account" ||
+                          route === "workspaces"));
+                    return (
+                      <div
+                        key={p[0]}
+                        className={selected ? "nav-item active" : "nav-item"}
+                      >
+                        {link(p[0], labels[p[0]], true)}
+                      </div>
+                    );
+                  })}
+                </div>
               </nav>
               <a
                 className="api-link"
@@ -207,10 +227,8 @@ export function PortalShell({
                     <p>
                       {current
                         ? route === "dashboard"
-                          ? "Your workspace for trusted content."
-                          : "Manage " +
-                            current[2].toLowerCase() +
-                            " for your workspace."
+                          ? "Sign files. Check their history."
+                          : ""
                         : "This page is unavailable for your role or does not exist."}
                     </p>
                   </div>
@@ -225,7 +243,7 @@ export function PortalShell({
                   <Icon name="shield" size={26} />
                 </div>
                 <h1>Welcome to Trust Portal</h1>
-                <p>Sign in to manage content authenticity and provenance.</p>
+                <p>Sign in to your workspace.</p>
               </header>
             )}
             <div id="page-content">
@@ -240,18 +258,15 @@ export function PortalShell({
                   <div className="dashboard-hero">
                     <div className="hero-copy">
                       <span className="eyebrow">
-                        <Icon name="shield" size={14} /> CONTENT AUTHENTICITY,
-                        CONNECTED
+                        <Icon name="shield" size={14} /> YOUR CONTENT. YOUR
+                        STORY.
                       </span>
                       <h2>
-                        Create with confidence.
+                        Make your content
                         <br />
-                        Publish with provenance.
+                        easy to trust.
                       </h2>
-                      <p>
-                        Bring your content, credentials and trust policies
-                        together in one secure workspace.
-                      </p>
+                      <p>Add a signed record of who made your file.</p>
                       <div className="hero-links">
                         {link(
                           user.role === "VIEWER" ? "inspect" : "sign",
@@ -259,7 +274,7 @@ export function PortalShell({
                             ? "Verify content →"
                             : "Sign content →",
                         )}
-                        {link("jobs", "View signing jobs")}
+                        {link("jobs", "View files")}
                       </div>
                     </div>
                     <div className="provenance-visual" aria-hidden="true">
@@ -302,51 +317,71 @@ export function PortalShell({
                       </small>
                     </article>
                   </div>
-                  <section>
-                    <h2>Your content workflow</h2>
-                    <p>Create, track and inspect content credentials.</p>
-                    <div className="action-grid">
-                      {visible
-                        .filter((p) =>
-                          ["sign", "jobs", "inspect"].includes(p[0]),
-                        )
-                        .map((p) => (
-                          <article key={p[0]}>
-                            <span className="action-symbol">
-                              <Icon name={p[0]} size={22} />
-                            </span>
-                            <h3>{p[2]}</h3>
-                            {link(p[0], "Open workspace →")}
-                          </article>
-                        ))}
-                    </div>
-                  </section>
-                  {user.role === "ADMIN" && (
-                    <section>
-                      <h2>Workspace configuration</h2>
-                      <p>
-                        Manage providers and policies on dedicated pages. Save,
-                        test and activate configurations before use.
-                      </p>
-                      <div className="quick-links">
-                        {[
-                          "profile",
-                          "identities",
-                          "public-trust",
-                          "storage",
-                          "workers",
-                        ].map((id) => {
-                          const p = visible.find((p) => p[0] === id);
-                          return p ? (
-                            <React.Fragment key={id}>
-                              {link(id, p[2])}
-                            </React.Fragment>
-                          ) : null;
-                        })}
-                      </div>
-                    </section>
-                  )}
                 </>
+              )}
+              {enabled && ["settings", "account"].includes(route) && (
+                <div className="settings-directory">
+                  {[
+                    ...new Set(
+                      visible
+                        .filter(
+                          (p) =>
+                            !["settings", "account"].includes(p[0]) &&
+                            (route === "account"
+                              ? p[1] === "My account" || p[0] === "workspaces"
+                              : !["Overview", "Content", "My account"].includes(
+                                  p[1],
+                                ) && p[0] !== "workspaces"),
+                        )
+                        .map((p) => p[1]),
+                    ),
+                  ].map((group) => (
+                    <section key={group}>
+                      <details
+                        className="settings-group"
+                        data-default-open={
+                          group === "Configuration" || route === "account"
+                            ? "true"
+                            : "false"
+                        }
+                        open={group === "Configuration" || route === "account"}
+                      >
+                        <summary>
+                          {group === "Configuration"
+                            ? "App settings"
+                            : group === "Trust & compliance"
+                              ? "Trust & safety"
+                              : group === "Administration"
+                                ? "Team access"
+                                : group === "My account"
+                                  ? "Your account"
+                                  : group}
+                        </summary>
+                        <div className="setting-grid">
+                          {visible
+                            .filter(
+                              (p) =>
+                                p[1] === group &&
+                                !["settings", "account"].includes(p[0]) &&
+                                (route === "account"
+                                  ? p[1] === "My account" ||
+                                    p[0] === "workspaces"
+                                  : p[0] !== "workspaces"),
+                            )
+                            .map((p) => (
+                              <div className="setting-tile" key={p[0]}>
+                                <span className="setting-icon">
+                                  <Icon name={p[0]} size={22} />
+                                </span>
+                                {link(p[0], p[2])}
+                                <Icon name="arrow" size={16} />
+                              </div>
+                            ))}
+                        </div>
+                      </details>
+                    </section>
+                  ))}
+                </div>
               )}
               {children}
             </div>

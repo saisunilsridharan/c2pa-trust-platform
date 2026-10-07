@@ -30,6 +30,7 @@ export function Icon({
       "M8 17v5l4-2 4 2v-5 M12 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16z m-3-9 2 2 4-4",
   };
   let key = name;
+  if (name === "account") key = "users";
   if (
     [
       "private-trust",
@@ -136,7 +137,12 @@ export function WorkspaceTools({
       >
         <Icon name="collapse" />
       </button>
-      <button ref={trigger} className="search-trigger" onClick={open}>
+      <button
+        ref={trigger}
+        aria-label="Search pages"
+        className="search-trigger"
+        onClick={open}
+      >
         <Icon name="search" />
         <span>Search pages…</span>
         <kbd>⌘ / Ctrl K</kbd>

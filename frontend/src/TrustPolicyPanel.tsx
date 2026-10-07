@@ -96,12 +96,15 @@ export default function TrustPolicyPanel({ token }: { token: string }) {
   return (
     <section>
       <h2>Private certificate trust policy</h2>
-      <p>
-        Organization trust is distinct from public C2PA trust. CA anchors
-        entered here apply only to this workspace. Reports identify the policy
-        version and retain cryptographic integrity results. Public trust-list
-        verification and trusted timestamps require separate configuration.
-      </p>
+      <details className="help-details">
+        <summary>More info</summary>
+        <p>
+          Organization trust is distinct from public C2PA trust. CA anchors
+          entered here apply only to this workspace. Reports identify the policy
+          version and retain cryptographic integrity results. Public trust-list
+          verification and trusted timestamps require separate configuration.
+        </p>
+      </details>
       <p>
         Active policy: {state?.active?.id ?? "SDK default"}. Strict signing:{" "}
         {state?.active?.configuration.requireTrustedSigning

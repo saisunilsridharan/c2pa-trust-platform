@@ -59,12 +59,15 @@ export default function ProcessingPanel({ token }: { token: string }) {
   return (
     <section>
       <h2>Processing limits</h2>
-      <p>
-        Future jobs retain these limits at submission. Database leases prevent
-        two application instances from claiming the same job. Multiple instances
-        require shared asset and identity directories and the same encryption
-        key. Each attempt writes separate output files.
-      </p>
+      <details className="help-details">
+        <summary>More info</summary>
+        <p>
+          Future jobs retain these limits at submission. Database leases prevent
+          two application instances from claiming the same job. Multiple
+          instances require shared asset and identity directories and the same
+          encryption key. Each attempt writes separate output files.
+        </p>
+      </details>
       <button
         disabled={busy}
         onClick={() => run(async () => setSettings(await request()))}
@@ -177,14 +180,17 @@ export default function ProcessingPanel({ token }: { token: string }) {
               </option>
             </select>
           </label>
-          <p>
-            Limited mode does not isolate the filesystem or operating-system
-            network. Namespace mode requires a successful host capability test
-            and fails closed if unavailable. Vendor PKCS#11 and TSA access runs
-            in the backend through the job's private socket. These controls
-            cover local workers; a distributed pool requires separate deployment
-            acceptance.
-          </p>
+          <details className="help-details">
+            <summary>More info</summary>
+            <p>
+              Limited mode does not isolate the filesystem or operating-system
+              network. Namespace mode requires a successful host capability test
+              and fails closed if unavailable. Vendor PKCS#11 and TSA access
+              runs in the backend through the job's private socket. These
+              controls cover local workers; a distributed pool requires separate
+              deployment acceptance.
+            </p>
+          </details>
           <button
             disabled={
               busy ||

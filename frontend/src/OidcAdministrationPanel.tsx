@@ -166,11 +166,15 @@ export default function OidcAdministrationPanel({ token }: { token: string }) {
             />
             Allow HTTP only for loopback development services.
           </label>
-          <p>
-            Register the callback URL with your provider. Use authorization code
-            flow, PKCE S256 and RS256 ID tokens. Discovery, authorization, token
-            and key endpoints must share the issuer origin.
-          </p>
+          <details className="help-details">
+            <summary>More info</summary>
+            <p>
+              Register the callback URL with your provider. Use authorization
+              code flow, PKCE S256 and RS256 ID tokens. Discovery,
+              authorization, token and key endpoints must share the issuer
+              origin.
+            </p>
+          </details>
         </>
       )}
       <button

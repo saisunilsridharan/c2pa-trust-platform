@@ -62,14 +62,10 @@ export default function NotificationsPanel({ token }: { token: string }) {
   }
   return (
     <section>
-      <h2>Job notifications · {unread} unread</h2>
-      <p>
-        Signing outcomes remain here after a restart, including failed attempts.
-        Use Saved assets & signing jobs to download successful outputs or retry
-        failures.
-      </p>
+      <h2>Inbox · {unread} unread</h2>
+      <p>See what finished and what needs attention.</p>
       <button disabled={busy} onClick={() => run(load)}>
-        Refresh notifications
+        Refresh
       </button>
       <div className="table-wrap">
         <table>

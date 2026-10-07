@@ -62,13 +62,16 @@ export default function AuthenticationLimitsPanel({
   return (
     <section>
       <h2>Shared login rate limits</h2>
-      <p>
-        Limits cover password login, recovery, enrollment and private-login
-        start/completion across application instances sharing the database.
-        Account lockout remains separate. Rejected requests return a retry time
-        before expensive authentication work. These application controls
-        complement your network edge protections.
-      </p>
+      <details className="help-details">
+        <summary>More info</summary>
+        <p>
+          Limits cover password login, recovery, enrollment and private-login
+          start/completion across application instances sharing the database.
+          Account lockout remains separate. Rejected requests return a retry
+          time before expensive authentication work. These application controls
+          complement your network edge protections.
+        </p>
+      </details>
       {policy && (
         <>
           <label>
@@ -121,12 +124,15 @@ export default function AuthenticationLimitsPanel({
               }
             />
           </label>
-          <p>
-            Only trust proxy addresses you control. Forwarded addresses are
-            ignored for all other peers; trusted proxies must correctly append
-            or replace X-Forwarded-For. Shared NAT users count together. Policy
-            changes preserve current counters and apply immediately.
-          </p>
+          <details className="help-details">
+            <summary>More info</summary>
+            <p>
+              Only trust proxy addresses you control. Forwarded addresses are
+              ignored for all other peers; trusted proxies must correctly append
+              or replace X-Forwarded-For. Shared NAT users count together.
+              Policy changes preserve current counters and apply immediately.
+            </p>
+          </details>
           <button disabled={busy} onClick={() => run(true)}>
             Save authentication policy
           </button>
