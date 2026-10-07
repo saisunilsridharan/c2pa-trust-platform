@@ -296,29 +296,38 @@ authenticated deep links, viewer restrictions and mobile layout with disposable
 mock API responses; it does not modify enrolled accounts or provider settings.
 
 The modern workspace includes consistent vector navigation icons, a collapsible
-sidebar, a redesigned provenance dashboard and shared light/dark theme tokens
+sidebar, a compact workflow dashboard and shared light/dark theme tokens
 across forms, tables and configuration pages. The theme preference is retained in
 browser storage. Open page search from the toolbar or with Ctrl/Command+K; filter
 permitted pages, navigate with arrow keys and Enter, or dismiss with Escape. Search
 uses the same role-aware page list as the sidebar. The native modal traps focus
 and restores focus when dismissed. Reduced-motion preferences are respected.
 
-### Simple user experience
+### Reference console workflow
 
-The primary menu is limited to Home, Sign, Files & jobs, Verify, Inbox,
-Settings and Account, with unavailable items removed for each role. Advanced
-pages retain their URLs and search access; Settings groups them into compact
-expandable sections. Account keeps personal security and workspace access
-separate. Icons always have short text labels or accessible names.
+The current UI follows the supplied minimal C2PA Console reference rather than a
+marketing dashboard. Work has Dashboard, Validate, Sign and Batch sign; Manage
+has direct certificate/profile/trust/timestamp pages; Monitor separates audit and
+jobs. Less common integrations remain in Settings. Legacy URLs and permitted-page
+search continue to work. There is no unsupported Multi-sign menu.
 
-Signing follows three sections: choose a signer, add a file, and check/sign.
-Public-detail confirmation and existing signing rules remain required. Long
-static explanations are available under More info; technical inspection JSON
-is collapsed behind Technical report. Required acknowledgments, errors and
-public-trust limitations stay visible. First-time login setup is also collapsed.
+Certificates has PKCS#12 and HSM tabs. PKCS#12 import remains tested and requires
+explicit local-key/replacement acknowledgment; recovery and history are optional
+sections. HSM uses saved PIN labels, with manual IDs/pagination in More PIN options;
+module provisioning, immutable drafts, signing tests and profile approval still
+apply. Requests/renewal are optional sections. Signer profiles exposes the profile
+editor and certificate choices together.
 
-Browser layout checks cover all 31 pages at 360, 768 and 1440 pixels with mock
-API bootstrap data and unavailable-provider states, including expanded help.
-These checks verify no document overflow or overlapping content buttons, settings
-discovery, short role-aware menus and signing review gating; they do not replace
-real-provider acceptance. Frontend tests now total 11.
+Sign and Validate have file/form and result columns that stack on phones. File
+pickers also accept drag/drop. Signing titles default to the file name but remain
+editable; creator, AI disclosure and public-detail review remain enforced. The
+signed output can be downloaded and is submitted to the existing verification API
+for its actual report. An unavailable report is shown as unavailable and does not
+prevent downloading an already signed file. Signature validity and trust stay
+separate. Batch submission and job monitoring have separate pages.
+
+Frontend build and 12 tests pass. Mock-API Chromium UI acceptance covers signing
+review/download/report-success/report-unavailability, certificate tabs and PIN
+selection, separate batch/jobs, role restrictions and all 33 routes at 360, 768
+and 1440 pixels with expanded help. These are UI/protocol checks, not official
+signer or hardware-provider acceptance.

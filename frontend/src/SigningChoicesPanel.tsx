@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { workspaceFetch } from "./portalFetch";
 export type SigningChoice = {
   id: string;
@@ -23,8 +23,10 @@ export function SigningChoiceSelector({
   token,
   value,
   onChange,
+  checks,
 }: {
   token: string;
+  checks?: ReactNode;
   value: SigningChoice | null;
   onChange: (value: SigningChoice | null) => void;
 }) {
@@ -60,14 +62,14 @@ export function SigningChoiceSelector({
   return (
     <>
       <label>
-        Approved profile & signing certificate
+        Signer profile
         <select
           value={value?.id ?? ""}
           onChange={(e) =>
             onChange(choices.find((c) => c.id === e.target.value) ?? null)
           }
         >
-          <option value="">Current workspace profile & certificate</option>
+          <option value="">Workspace default</option>
           {value && !choices.some((c) => c.id === value.id) && (
             <option value={value.id}>{value.label} · selected</option>
           )}
@@ -80,31 +82,35 @@ export function SigningChoiceSelector({
           ))}
         </select>
       </label>
-      <div className="actions">
-        <button disabled={!page} onClick={() => setPage(page - 1)}>
-          Back
-        </button>
-        <button
-          disabled={choices.length < 50}
-          onClick={() => setPage(page + 1)}
-        >
-          Next
-        </button>
-        <button onClick={() => load().catch((e) => setMessage(e.message))}>
-          Refresh
-        </button>
-      </div>
-      {value && (
-        <p>
-          Certificate SHA-256: <code>{value.fingerprint}</code>.{" "}
-          {value.development
-            ? "Development certificate; untrusted."
-            : value.provider === "PKCS11"
-              ? "PKCS#11 token; public trust unverified."
-              : "Private certificate; public trust unverified."}{" "}
-          Timestamping follows the active workspace provider policy.
-        </p>
-      )}
+      <details className="help-details">
+        <summary>More options</summary>
+        {checks}{" "}
+        <div className="actions">
+          <button disabled={!page} onClick={() => setPage(page - 1)}>
+            Back
+          </button>
+          <button
+            disabled={choices.length < 50}
+            onClick={() => setPage(page + 1)}
+          >
+            Next
+          </button>
+          <button onClick={() => load().catch((e) => setMessage(e.message))}>
+            Refresh
+          </button>
+        </div>
+        {value && (
+          <p>
+            Certificate SHA-256: <code>{value.fingerprint}</code>.{" "}
+            {value.development
+              ? "Development certificate; untrusted."
+              : value.provider === "PKCS11"
+                ? "PKCS#11 token; public trust unverified."
+                : "Private certificate; public trust unverified."}{" "}
+            Timestamping follows the active workspace provider policy.
+          </p>
+        )}
+      </details>{" "}
       <p role="status">{message}</p>
     </>
   );

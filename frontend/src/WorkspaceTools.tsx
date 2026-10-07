@@ -31,6 +31,8 @@ export function Icon({
   };
   let key = name;
   if (name === "account") key = "users";
+  if (name === "batch") key = "jobs";
+  if (name === "certificates") key = "certificate";
   if (
     [
       "private-trust",

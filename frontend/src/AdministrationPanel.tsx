@@ -108,76 +108,7 @@ export default function AdministrationPanel({
   }, [revision, historyPage]);
   return (
     <section>
-      <div className="section-title">
-        <h2>Administration & recovery</h2>
-        <button
-          disabled={busy}
-          className="secondary"
-          onClick={() =>
-            run(async () => {
-              await onChange();
-              await load();
-            })
-          }
-        >
-          Refresh
-        </button>
-      </div>
-      <h3>Signing certificate</h3>
-      {identity ? (
-        <>
-          <p>
-            Status: <strong>{identity.state}</strong> · provider:{" "}
-            {identity.provider} · public trust not verified
-            <br />
-            Expiry:{" "}
-            {identity.expiresAt
-              ? new Date(identity.expiresAt).toLocaleString()
-              : "Not configured"}
-          </p>
-          {identity.fingerprint && (
-            <p className="fingerprint">
-              SHA-256: <code>{identity.fingerprint}</code>
-            </p>
-          )}
-          {identity.configured && (
-            <>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={rotateConfirmed}
-                  onChange={(e) => setRotateConfirmed(e.target.checked)}
-                />
-                Replace with a development identity for future signatures.
-                Existing signed files and in-progress requests keep their
-                original identity.
-              </label>
-              <button
-                disabled={busy || !rotateConfirmed}
-                onClick={() =>
-                  run(async () => {
-                    await request("signing-identity/development/rotate", {
-                      expectedFingerprint: identity.fingerprint,
-                      acknowledgeUntrusted: true,
-                    });
-                    setRotateConfirmed(false);
-                    await onChange();
-                    await load();
-                    setMessage(
-                      "Development certificate rotated; production trust remains unavailable.",
-                    );
-                  })
-                }
-              >
-                Rotate development certificate
-              </button>
-            </>
-          )}
-        </>
-      ) : (
-        <p>Loading status…</p>
-      )}
-      <h3>Import a private CA identity</h3>
+      <h3>Import PKCS#12</h3>
       <details className="help-details">
         <summary>More info</summary>
         <p>
@@ -189,7 +120,7 @@ export default function AdministrationPanel({
         </p>
       </details>
       <label>
-        PKCS#12 bundle (up to 1 MiB)
+        Certificate file (.p12 or .pfx, up to 1 MB)
         <input
           type="file"
           accept=".p12,.pfx"
@@ -200,7 +131,7 @@ export default function AdministrationPanel({
         />
       </label>
       <label>
-        Bundle password
+        File password
         <input
           type="password"
           autoComplete="off"
@@ -255,143 +186,217 @@ export default function AdministrationPanel({
           })
         }
       >
-        Test and import private identity
+        Test and import
       </button>
-      <h3>Configuration history</h3>
-      <p>
-        Restore replaces both active settings and the draft. Only versions
-        recorded by this release are available.
-      </p>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Select</th>
-              <th>Revision</th>
-              <th>Organization / profile</th>
-              <th>Action / date</th>
-            </tr>
-          </thead>
-          <tbody>
-            {history.map((v) => (
-              <tr key={v.id}>
-                <td>
+      <details className="help-details">
+        <summary>Current certificate and recovery</summary>{" "}
+        <div className="section-title">
+          <h2>Administration & recovery</h2>
+          <button
+            disabled={busy}
+            className="secondary"
+            onClick={() =>
+              run(async () => {
+                await onChange();
+                await load();
+              })
+            }
+          >
+            Refresh
+          </button>
+        </div>
+        <h3>Signing certificate</h3>
+        {identity ? (
+          <>
+            <p>
+              Status: <strong>{identity.state}</strong> · provider:{" "}
+              {identity.provider} · public trust not verified
+              <br />
+              Expiry:{" "}
+              {identity.expiresAt
+                ? new Date(identity.expiresAt).toLocaleString()
+                : "Not configured"}
+            </p>
+            {identity.fingerprint && (
+              <p className="fingerprint">
+                SHA-256: <code>{identity.fingerprint}</code>
+              </p>
+            )}
+            {identity.configured && (
+              <>
+                <label className="check">
                   <input
-                    type="radio"
-                    name="version"
-                    aria-label={`Select revision ${v.revision}`}
-                    checked={selected === v.id}
-                    onChange={() => {
-                      setSelected(v.id);
-                      setRollbackConfirmed(false);
-                    }}
+                    type="checkbox"
+                    checked={rotateConfirmed}
+                    onChange={(e) => setRotateConfirmed(e.target.checked)}
                   />
-                </td>
-                <td>{v.revision}</td>
-                <td>
-                  {v.settings.organizationName}
-                  <br />
-                  {v.settings.profileName}
-                </td>
-                <td>
-                  {v.action}
-                  <br />
-                  {new Date(v.createdAt).toLocaleString()}
-                </td>
+                  Replace with a development identity for future signatures.
+                  Existing signed files and in-progress requests keep their
+                  original identity.
+                </label>
+                <button
+                  disabled={busy || !rotateConfirmed}
+                  onClick={() =>
+                    run(async () => {
+                      await request("signing-identity/development/rotate", {
+                        expectedFingerprint: identity.fingerprint,
+                        acknowledgeUntrusted: true,
+                      });
+                      setRotateConfirmed(false);
+                      await onChange();
+                      await load();
+                      setMessage(
+                        "Development certificate rotated; production trust remains unavailable.",
+                      );
+                    })
+                  }
+                >
+                  Rotate development certificate
+                </button>
+              </>
+            )}
+          </>
+        ) : (
+          <p>Loading status…</p>
+        )}
+      </details>
+      <details className="help-details">
+        <summary>History and audit</summary> <h3>Configuration history</h3>
+        <p>
+          Restore replaces both active settings and the draft. Only versions
+          recorded by this release are available.
+        </p>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Select</th>
+                <th>Revision</th>
+                <th>Organization / profile</th>
+                <th>Action / date</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {!history.length && <p>No versions on this page.</p>}
-      <div className="actions">
+            </thead>
+            <tbody>
+              {history.map((v) => (
+                <tr key={v.id}>
+                  <td>
+                    <input
+                      type="radio"
+                      name="version"
+                      aria-label={`Select revision ${v.revision}`}
+                      checked={selected === v.id}
+                      onChange={() => {
+                        setSelected(v.id);
+                        setRollbackConfirmed(false);
+                      }}
+                    />
+                  </td>
+                  <td>{v.revision}</td>
+                  <td>
+                    {v.settings.organizationName}
+                    <br />
+                    {v.settings.profileName}
+                  </td>
+                  <td>
+                    {v.action}
+                    <br />
+                    {new Date(v.createdAt).toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {!history.length && <p>No versions on this page.</p>}
+        <div className="actions">
+          <button
+            className="secondary"
+            disabled={busy || historyPage === 0}
+            onClick={() => setHistoryPage((p) => p - 1)}
+          >
+            Previous versions
+          </button>
+          <button
+            className="secondary"
+            disabled={busy || history.length < 50}
+            onClick={() => setHistoryPage((p) => p + 1)}
+          >
+            Next versions
+          </button>
+        </div>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={rollbackConfirmed}
+            disabled={selected === null}
+            onChange={(e) => setRollbackConfirmed(e.target.checked)}
+          />
+          Restore the selected version and replace my draft.
+        </label>
         <button
-          className="secondary"
-          disabled={busy || historyPage === 0}
-          onClick={() => setHistoryPage((p) => p - 1)}
+          disabled={busy || selected === null || !rollbackConfirmed}
+          onClick={() =>
+            run(async () => {
+              await request("configuration/rollback", {
+                versionId: selected,
+                revision,
+              });
+              await onChange();
+              await load();
+              setRollbackConfirmed(false);
+              setMessage("Configuration restored as a new revision.");
+            })
+          }
         >
-          Previous versions
+          Restore selected version
         </button>
-        <button
-          className="secondary"
-          disabled={busy || history.length < 50}
-          onClick={() => setHistoryPage((p) => p + 1)}
-        >
-          Next versions
-        </button>
-      </div>
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={rollbackConfirmed}
-          disabled={selected === null}
-          onChange={(e) => setRollbackConfirmed(e.target.checked)}
-        />
-        Restore the selected version and replace my draft.
-      </label>
-      <button
-        disabled={busy || selected === null || !rollbackConfirmed}
-        onClick={() =>
-          run(async () => {
-            await request("configuration/rollback", {
-              versionId: selected,
-              revision,
-            });
-            await onChange();
-            await load();
-            setRollbackConfirmed(false);
-            setMessage("Configuration restored as a new revision.");
-          })
-        }
-      >
-        Restore selected version
-      </button>
-      <h3>Audit records</h3>
-      <p>
-        Local-administrator actions; credentials and content declarations are
-        excluded.
-      </p>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Action</th>
-              <th>Actor / reference</th>
-            </tr>
-          </thead>
-          <tbody>
-            {events.map((e) => (
-              <tr key={e.id}>
-                <td>{new Date(e.createdAt).toLocaleString()}</td>
-                <td>{e.action}</td>
-                <td className="fingerprint">
-                  {e.actor}
-                  <br />
-                  {e.reference}
-                </td>
+        <h3>Audit records</h3>
+        <p>
+          Local-administrator actions; credentials and content declarations are
+          excluded.
+        </p>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Action</th>
+                <th>Actor / reference</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {!events.length && <p>No audit records on this page.</p>}
-      <div className="actions">
-        <button
-          className="secondary"
-          disabled={busy || auditPage === 0}
-          onClick={() => setAuditPage((p) => p - 1)}
-        >
-          Previous events
-        </button>
-        <button
-          className="secondary"
-          disabled={busy || events.length < 50}
-          onClick={() => setAuditPage((p) => p + 1)}
-        >
-          Next events
-        </button>
-      </div>
+            </thead>
+            <tbody>
+              {events.map((e) => (
+                <tr key={e.id}>
+                  <td>{new Date(e.createdAt).toLocaleString()}</td>
+                  <td>{e.action}</td>
+                  <td className="fingerprint">
+                    {e.actor}
+                    <br />
+                    {e.reference}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {!events.length && <p>No audit records on this page.</p>}
+        <div className="actions">
+          <button
+            className="secondary"
+            disabled={busy || auditPage === 0}
+            onClick={() => setAuditPage((p) => p - 1)}
+          >
+            Previous events
+          </button>
+          <button
+            className="secondary"
+            disabled={busy || events.length < 50}
+            onClick={() => setAuditPage((p) => p + 1)}
+          >
+            Next events
+          </button>
+        </div>
+      </details>
       <p role="status" aria-live="polite">
         {busy ? "Loading administration…" : message}
       </p>

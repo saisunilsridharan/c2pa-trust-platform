@@ -7,14 +7,16 @@ export type PortalAccount = {
   passwordChangeRequired: boolean;
 };
 export const pages: [string, string, string, string?][] = [
-  ["dashboard", "Overview", "Dashboard"],
+  ["certificates", "Manage", "Certificates", "admin"],
+  ["batch", "Work", "Batch sign", "signer"],
+  ["dashboard", "Work", "Dashboard"],
   ["settings", "Configuration", "Settings", "admin"],
   ["account", "My account", "Account", "account"],
-  ["sign", "Content", "Sign content", "signer"],
-  ["jobs", "Content", "Signing jobs"],
-  ["inspect", "Content", "Verify content"],
-  ["notifications", "Content", "Notifications"],
-  ["profile", "Configuration", "Signing profile", "admin"],
+  ["sign", "Work", "Sign", "signer"],
+  ["jobs", "Monitor", "Jobs"],
+  ["inspect", "Work", "Validate"],
+  ["notifications", "Manage", "Notifications"],
+  ["profile", "Manage", "Signer profiles", "admin"],
   ["identities", "Certificates", "Software identities", "admin"],
   ["hardware", "Certificates", "Hardware identities", "admin"],
   ["choices", "Certificates", "Signing choices", "admin"],
@@ -23,7 +25,7 @@ export const pages: [string, string, string, string?][] = [
   ["private-trust", "Trust & compliance", "Private trust", "admin"],
   ["public-trust", "Trust & compliance", "Public trust", "admin"],
   ["revocation", "Trust & compliance", "Revocation policy", "admin"],
-  ["timestamps", "Trust & compliance", "Timestamp services", "admin"],
+  ["timestamps", "Manage", "Timestamping", "admin"],
   ["audit", "Trust & compliance", "Audit integrity", "admin"],
   ["audit-storage", "Trust & compliance", "Audit retention", "admin"],
   ["credentials", "Configuration", "Credentials", "admin"],
@@ -60,12 +62,18 @@ export function pageFromPath(path: string) {
 export function sidebarPages(user: PortalAccount | null) {
   const order = [
     "dashboard",
-    "sign",
-    "jobs",
     "inspect",
+    "sign",
+    "batch",
+    "certificates",
+    "profile",
+    "private-trust",
+    "timestamps",
     "notifications",
     "settings",
     "account",
+    "audit",
+    "jobs",
   ];
   const permitted = allowedPages(user);
   return order.flatMap((id) => {

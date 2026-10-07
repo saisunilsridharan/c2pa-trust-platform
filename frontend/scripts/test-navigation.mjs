@@ -68,19 +68,32 @@ test("deep links and trailing slashes preserve page selection; unknown paths rem
   assert.notEqual(pageFromPath("/not-a-page"), "dashboard");
 });
 
-test("simple sidebar prioritizes daily tasks and keeps advanced pages discoverable", () => {
+test("reference console exposes work and certificate tasks without a fake multi-sign item", () => {
   assert.deepEqual(
     sidebarPages({ ...account, role: "ADMIN" }).map((p) => p[0]),
     [
       "dashboard",
-      "sign",
-      "jobs",
       "inspect",
+      "sign",
+      "batch",
+      "certificates",
+      "profile",
+      "private-trust",
+      "timestamps",
       "notifications",
       "settings",
       "account",
+      "audit",
+      "jobs",
     ],
   );
   assert(!sidebarPages(account).some((p) => p[0] === "settings"));
   assert(ids({ ...account, role: "ADMIN" }).includes("public-trust"));
+});
+
+test("batch and certificate pages retain role restrictions", () => {
+  assert(!ids(account).includes("batch"));
+  assert(!ids(account).includes("certificates"));
+  assert(ids({ ...account, role: "SIGNER" }).includes("batch"));
+  assert(!ids({ ...account, role: "SIGNER" }).includes("certificates"));
 });

@@ -68,8 +68,8 @@ export function PortalShell({
   }, [enabled]);
   useEffect(() => {
     document.title = enabled
-      ? `${current?.[2] ?? "Page unavailable"} · Trust Portal`
-      : "Sign in · Trust Portal";
+      ? `${current?.[2] ?? "Page unavailable"} · C2PA Console`
+      : "Sign in · C2PA Console";
   }, [enabled, current]);
   function link(id: string, label: string, icon = false) {
     return (
@@ -129,46 +129,42 @@ export function PortalShell({
                   <Icon name="shield" size={22} />
                 </span>
                 <span>
-                  Trust Portal<small>CONTENT AUTHENTICITY</small>
+                  C2PA Console<small>Content Credentials</small>
                 </span>
               </div>
               <div className="workspace-label">
                 WORKSPACE <strong>#{user.workspaceId}</strong>
               </div>
               <nav aria-label="Main navigation">
-                <div className="nav-group">
-                  <h2>Workspace</h2>
-                  {sidebarPages(user).map((p) => {
-                    const labels: Record<string, string> = {
-                      dashboard: "Home",
-                      sign: "Sign",
-                      jobs: "Files & jobs",
-                      inspect: "Verify",
-                      notifications: "Inbox",
-                      settings: "Settings",
-                      account: "Account",
-                    };
-                    const selected =
-                      route === p[0] ||
-                      (p[0] === "settings" &&
-                        current &&
-                        !["Overview", "Content", "My account"].includes(
-                          current[1],
-                        ) &&
-                        route !== "workspaces") ||
-                      (p[0] === "account" &&
-                        (current?.[1] === "My account" ||
-                          route === "workspaces"));
-                    return (
-                      <div
-                        key={p[0]}
-                        className={selected ? "nav-item active" : "nav-item"}
-                      >
-                        {link(p[0], labels[p[0]], true)}
-                      </div>
-                    );
-                  })}
-                </div>
+                {["Work", "Manage", "Monitor"].map((group) => (
+                  <div className="nav-group" key={group}>
+                    <h2>{group}</h2>
+                    {sidebarPages(user)
+                      .filter((p) =>
+                        p[0] === "settings" ||
+                        p[0] === "account" ||
+                        p[0] === "private-trust"
+                          ? group === "Manage"
+                          : p[0] === "audit"
+                            ? group === "Monitor"
+                            : p[1] === group,
+                      )
+                      .map((p) => (
+                        <div
+                          className={
+                            route === p[0] ? "nav-item active" : "nav-item"
+                          }
+                          key={p[0]}
+                        >
+                          {link(
+                            p[0],
+                            p[0] === "private-trust" ? "Trust store" : p[2],
+                            true,
+                          )}
+                        </div>
+                      ))}
+                  </div>
+                ))}
               </nav>
               <a
                 className="api-link"
@@ -227,7 +223,7 @@ export function PortalShell({
                     <p>
                       {current
                         ? route === "dashboard"
-                          ? "Sign files. Check their history."
+                          ? "Validate a file or sign it with your profile."
                           : ""
                         : "This page is unavailable for your role or does not exist."}
                     </p>
@@ -242,8 +238,8 @@ export function PortalShell({
                 <div className="brand-mark">
                   <Icon name="shield" size={26} />
                 </div>
-                <h1>Welcome to Trust Portal</h1>
-                <p>Sign in to your workspace.</p>
+                <h1>C2PA Console</h1>
+                <p>Sign in to C2PA Console.</p>
               </header>
             )}
             <div id="page-content">
@@ -255,42 +251,18 @@ export function PortalShell({
               )}
               {enabled && route === "dashboard" && (
                 <>
-                  <div className="dashboard-hero">
-                    <div className="hero-copy">
-                      <span className="eyebrow">
-                        <Icon name="shield" size={14} /> YOUR CONTENT. YOUR
-                        STORY.
-                      </span>
-                      <h2>
-                        Make your content
-                        <br />
-                        easy to trust.
-                      </h2>
-                      <p>Add a signed record of who made your file.</p>
-                      <div className="hero-links">
-                        {link(
-                          user.role === "VIEWER" ? "inspect" : "sign",
-                          user.role === "VIEWER"
-                            ? "Verify content →"
-                            : "Sign content →",
-                        )}
-                        {link("jobs", "View files")}
-                      </div>
-                    </div>
-                    <div className="provenance-visual" aria-hidden="true">
-                      <div className="orbit orbit-one" />
-                      <div className="orbit orbit-two" />
-                      <div className="provenance-core">
-                        <Icon name="shield" size={52} />
-                        <span>C2PA</span>
-                      </div>
-                      <span className="orbit-label label-one">Content</span>
-                      <span className="orbit-label label-two">Identity</span>
-                      <span className="orbit-label label-three">
-                        Provenance
-                      </span>
-                    </div>
-                  </div>
+                  <div className="console-shortcuts">
+                    {visible
+                      .filter((p) =>
+                        ["inspect", "sign", "batch"].includes(p[0]),
+                      )
+                      .map((p) => (
+                        <article key={p[0]}>
+                          <Icon name={p[0]} size={25} />
+                          {link(p[0], p[2])}
+                        </article>
+                      ))}
+                  </div>{" "}
                   <div className="metric-grid">
                     <article className="metric">
                       <span>Signing readiness</span>
@@ -329,9 +301,15 @@ export function PortalShell({
                             !["settings", "account"].includes(p[0]) &&
                             (route === "account"
                               ? p[1] === "My account" || p[0] === "workspaces"
-                              : !["Overview", "Content", "My account"].includes(
-                                  p[1],
-                                ) && p[0] !== "workspaces"),
+                              : !sidebarPages(user).some(
+                                  (item) => item[0] === p[0],
+                                ) &&
+                                ![
+                                  "workspaces",
+                                  "identities",
+                                  "hardware",
+                                  "choices",
+                                ].includes(p[0])),
                         )
                         .map((p) => p[1]),
                     ),
@@ -366,7 +344,15 @@ export function PortalShell({
                                 (route === "account"
                                   ? p[1] === "My account" ||
                                     p[0] === "workspaces"
-                                  : p[0] !== "workspaces"),
+                                  : !sidebarPages(user).some(
+                                      (item) => item[0] === p[0],
+                                    ) &&
+                                    ![
+                                      "workspaces",
+                                      "identities",
+                                      "hardware",
+                                      "choices",
+                                    ].includes(p[0])),
                             )
                             .map((p) => (
                               <div className="setting-tile" key={p[0]}>
@@ -386,7 +372,7 @@ export function PortalShell({
               {children}
             </div>
             <footer className="page-footer">
-              Trust Portal <span>Content credentials · C2PA</span>
+              C2PA Console <span>Content Credentials</span>
             </footer>
           </main>
         </div>

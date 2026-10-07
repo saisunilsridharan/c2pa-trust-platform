@@ -22,6 +22,25 @@ export default function HardwareIdentitiesPanel({
   profileRevision: number | null;
 }) {
   const fetch = workspaceFetch();
+  const [pins, setPins] = useState<{ id: string; label: string }[]>([]),
+    [pinPage, setPinPage] = useState(0);
+  useEffect(() => {
+    let live = true;
+    fetch("/api/v1/admin/credentials?page=" + pinPage, {
+      headers: { "X-Admin-Token": token },
+    })
+      .then(async (r) => {
+        if (!r.ok) throw new Error();
+        const data = await r.json();
+        if (live) setPins(data);
+      })
+      .catch(() => {
+        if (live) setPins([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [token, pinPage]);
   const [config, setConfig] = useState<Config>({
       module: "",
       slotListIndex: 0,
@@ -88,7 +107,7 @@ export default function HardwareIdentitiesPanel({
   }
   return (
     <section>
-      <h2>PKCS#11 signing identities</h2>
+      <h2>HSM profile</h2>
       <details className="help-details">
         <summary>More info</summary>
         <p>
@@ -100,7 +119,7 @@ export default function HardwareIdentitiesPanel({
         </p>
       </details>
       <label>
-        Installed PKCS#11 module (absolute path)
+        Module path
         <input
           maxLength={2000}
           value={config.module}
@@ -113,7 +132,7 @@ export default function HardwareIdentitiesPanel({
         accepted for testing.
       </p>
       <label>
-        Slot list index
+        Slot index
         <input
           type="number"
           min={0}
@@ -125,7 +144,7 @@ export default function HardwareIdentitiesPanel({
         />
       </label>
       <label>
-        Token key alias
+        Key name
         <input
           maxLength={200}
           value={config.keyAlias}
@@ -133,17 +152,50 @@ export default function HardwareIdentitiesPanel({
         />
       </label>
       <label>
-        PIN credential ID (save through encrypted credentials in this workspace)
-        <input
-          maxLength={255}
+        Saved PIN
+        <select
           value={config.pinCredential}
           onChange={(e) =>
             setConfig({ ...config, pinCredential: e.target.value })
           }
-        />
+        >
+          <option value="">Choose a saved PIN</option>
+          {pins.map((pin) => (
+            <option key={pin.id} value={pin.id}>
+              {pin.label}
+            </option>
+          ))}
+          {config.pinCredential &&
+            !pins.some((pin) => pin.id === config.pinCredential) && (
+              <option value={config.pinCredential}>Selected PIN</option>
+            )}
+        </select>
       </label>
+      <p className="field-hint">Save your PIN in Credentials first.</p>
+      <details className="help-details">
+        <summary>More PIN options</summary>
+        <button disabled={!pinPage} onClick={() => setPinPage(pinPage - 1)}>
+          Back
+        </button>
+        <button
+          disabled={pins.length < 50}
+          onClick={() => setPinPage(pinPage + 1)}
+        >
+          Next
+        </button>
+        <label>
+          Credential ID
+          <input
+            value={config.pinCredential}
+            maxLength={255}
+            onChange={(e) =>
+              setConfig({ ...config, pinCredential: e.target.value })
+            }
+          />
+        </label>
+      </details>
       <label>
-        Public signing certificate and issuer chain (PEM, leaf first)
+        Certificate chain (PEM, signing certificate first)
         <textarea
           maxLength={64000}
           value={chain}
@@ -174,13 +226,13 @@ export default function HardwareIdentitiesPanel({
           })
         }
       >
-        Save identity draft
+        Save HSM draft
       </button>
-      <button disabled={busy} onClick={() => run(load)}>
-        Refresh identities
+      <button className="secondary" disabled={busy} onClick={() => run(load)}>
+        Refresh
       </button>
       <label>
-        Identity version
+        Saved HSM profile
         <select
           value={selected}
           onChange={(e) => {
@@ -188,7 +240,7 @@ export default function HardwareIdentitiesPanel({
             setCertificateAck(false);
           }}
         >
-          <option value="">Select identity version</option>
+          <option value="">Choose a profile</option>
           {rows.map((r) => (
             <option key={r.id} value={r.id}>
               {r.configuration.keyAlias} · {r.fingerprint.slice(0, 12)} ·{" "}
@@ -221,137 +273,140 @@ export default function HardwareIdentitiesPanel({
       >
         Test token & C2PA signing
       </button>
-      <h3>Certificate request and renewal</h3>
       <details className="help-details">
-        <summary>More info</summary>
-        <p>
-          Generate a PKCS#10 request signed by the selected token key, then
-          submit it to your private CA. The request includes C2PA signing usage.
-          The CA determines certificate policy and issuance. Download requests
-          before the current certificate expires. A replacement chain creates a
-          separate identity version and must pass real C2PA signing before
-          approval; existing choices and queued jobs retain their original
-          certificates.
-        </p>
-      </details>
-      <label>
-        Certificate common name
-        <input
-          maxLength={200}
-          value={subject.commonName}
-          onChange={(e) => {
-            setSubject({ ...subject, commonName: e.target.value });
-            setCertificateAck(false);
-          }}
-        />
-      </label>
-      <label>
-        Organization
-        <input
-          maxLength={200}
-          value={subject.organization}
-          onChange={(e) => {
-            setSubject({ ...subject, organization: e.target.value });
-            setCertificateAck(false);
-          }}
-        />
-      </label>
-      <label>
-        Country code
-        <input
-          maxLength={2}
-          value={subject.country}
-          onChange={(e) => {
-            setSubject({ ...subject, country: e.target.value.toUpperCase() });
-            setCertificateAck(false);
-          }}
-        />
-      </label>
-      <label>
-        Replacement certificate and issuer chain PEM
-        <textarea
-          maxLength={64000}
-          value={renewal}
-          onChange={(e) => {
-            setRenewal(e.target.value);
-            setCertificateAck(false);
-          }}
-        />
-      </label>
-      <label>
-        <input
-          type="checkbox"
-          checked={certificateAck}
-          onChange={(e) => setCertificateAck(e.target.checked)}
-        />
-        I reviewed the subject or replacement chain and the selected certificate
-        fingerprint.
-      </label>
-      <button
-        disabled={
-          busy || !current || !certificateAck || !subject.commonName.trim()
-        }
-        onClick={() =>
-          run(async () => {
-            const response = await fetch(
-              "/api/v1/admin/hardware-identities/" + current!.id + "/csr",
-              {
-                method: "POST",
-                headers: {
-                  "X-Admin-Token": token,
-                  "Content-Type": "application/json",
+        <summary>Request or renew a certificate</summary>{" "}
+        <h3>Certificate request and renewal</h3>
+        <details className="help-details">
+          <summary>More info</summary>
+          <p>
+            Generate a PKCS#10 request signed by the selected token key, then
+            submit it to your private CA. The request includes C2PA signing
+            usage. The CA determines certificate policy and issuance. Download
+            requests before the current certificate expires. A replacement chain
+            creates a separate identity version and must pass real C2PA signing
+            before approval; existing choices and queued jobs retain their
+            original certificates.
+          </p>
+        </details>
+        <label>
+          Certificate common name
+          <input
+            maxLength={200}
+            value={subject.commonName}
+            onChange={(e) => {
+              setSubject({ ...subject, commonName: e.target.value });
+              setCertificateAck(false);
+            }}
+          />
+        </label>
+        <label>
+          Organization
+          <input
+            maxLength={200}
+            value={subject.organization}
+            onChange={(e) => {
+              setSubject({ ...subject, organization: e.target.value });
+              setCertificateAck(false);
+            }}
+          />
+        </label>
+        <label>
+          Country code
+          <input
+            maxLength={2}
+            value={subject.country}
+            onChange={(e) => {
+              setSubject({ ...subject, country: e.target.value.toUpperCase() });
+              setCertificateAck(false);
+            }}
+          />
+        </label>
+        <label>
+          Replacement certificate and issuer chain PEM
+          <textarea
+            maxLength={64000}
+            value={renewal}
+            onChange={(e) => {
+              setRenewal(e.target.value);
+              setCertificateAck(false);
+            }}
+          />
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={certificateAck}
+            onChange={(e) => setCertificateAck(e.target.checked)}
+          />
+          I reviewed the subject or replacement chain and the selected
+          certificate fingerprint.
+        </label>
+        <button
+          disabled={
+            busy || !current || !certificateAck || !subject.commonName.trim()
+          }
+          onClick={() =>
+            run(async () => {
+              const response = await fetch(
+                "/api/v1/admin/hardware-identities/" + current!.id + "/csr",
+                {
+                  method: "POST",
+                  headers: {
+                    "X-Admin-Token": token,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    expectedIdentityFingerprint: current!.fingerprint,
+                    subject,
+                    acknowledgeCertificateSubject: true,
+                  }),
                 },
-                body: JSON.stringify({
-                  expectedIdentityFingerprint: current!.fingerprint,
-                  subject,
-                  acknowledgeCertificateSubject: true,
-                }),
-              },
-            );
-            if (!response.ok)
-              throw new Error(
-                "Certificate request failed. Check the selected token, certificate validity, PIN and subject.",
               );
-            const url = URL.createObjectURL(await response.blob());
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = "signing-certificate-request.pem";
-            link.click();
-            URL.revokeObjectURL(url);
-            setCertificateAck(false);
-            setMessage(
-              "Token-signed CSR downloaded. Submit it to your private CA; no private key is included.",
-            );
-          })
-        }
-      >
-        Download token-signed CSR
-      </button>
-      <button
-        disabled={busy || !current || !certificateAck || !renewal.trim()}
-        onClick={() =>
-          run(async () => {
-            const identity = await request(
-              "/" + current!.id + "/renewal",
-              "POST",
-              {
-                expectedIdentityFingerprint: current!.fingerprint,
-                certificateChainPem: renewal,
-                acknowledgeCertificateReplacement: true,
-              },
-            );
-            await load();
-            setSelected(identity.id);
-            setRenewal("");
-            setCertificateAck(false);
-            setMessage(
-              "New certificate version passed token-key matching and real C2PA signing. Review and approve it with a profile below.",
-            );
-          })
-        }
-      >
-        Test replacement certificate as new identity
-      </button>
+              if (!response.ok)
+                throw new Error(
+                  "Certificate request failed. Check the selected token, certificate validity, PIN and subject.",
+                );
+              const url = URL.createObjectURL(await response.blob());
+              const link = document.createElement("a");
+              link.href = url;
+              link.download = "signing-certificate-request.pem";
+              link.click();
+              URL.revokeObjectURL(url);
+              setCertificateAck(false);
+              setMessage(
+                "Token-signed CSR downloaded. Submit it to your private CA; no private key is included.",
+              );
+            })
+          }
+        >
+          Download token-signed CSR
+        </button>
+        <button
+          disabled={busy || !current || !certificateAck || !renewal.trim()}
+          onClick={() =>
+            run(async () => {
+              const identity = await request(
+                "/" + current!.id + "/renewal",
+                "POST",
+                {
+                  expectedIdentityFingerprint: current!.fingerprint,
+                  certificateChainPem: renewal,
+                  acknowledgeCertificateReplacement: true,
+                },
+              );
+              await load();
+              setSelected(identity.id);
+              setRenewal("");
+              setCertificateAck(false);
+              setMessage(
+                "New certificate version passed token-key matching and real C2PA signing. Review and approve it with a profile below.",
+              );
+            })
+          }
+        >
+          Test replacement certificate as new identity
+        </button>
+      </details>
       <label>
         Approved choice name
         <input

@@ -1,3 +1,5 @@
+import FileDropZone from "./FileDropZone";
+import CertificateWorkspace from "./CertificateWorkspace";
 import { PortalShell, Page } from "./PortalShell";
 import RevocationPanel from "./RevocationPanel";
 import RemoteWorkersPanel from "./RemoteWorkersPanel";
@@ -348,7 +350,7 @@ function App() {
                 <Page id="profile">
                   <section>
                     <div className="section-title">
-                      <h2>Organization & signing profile</h2>
+                      <h2>Signer profile</h2>
                       <span className="badge">Revision {state.revision}</span>
                     </div>
                     <label>
@@ -471,7 +473,7 @@ function App() {
                             });
                             setState(s);
                             setMessage(
-                              "Profile activated. Configure a development identity to sign.",
+                              "Profile ready. Choose a certificate to sign.",
                             );
                           })
                         }
@@ -480,6 +482,14 @@ function App() {
                       </button>
                     </div>
                   </section>
+                  <details className="help-details">
+                    <summary>Signing certificates</summary>
+                    <SigningChoicesPanel
+                      token={token}
+                      profileRevision={state.activeRevision}
+                      fingerprint={state.signingFingerprint}
+                    />
+                  </details>
                 </Page>
                 <Page id="credentials">
                   <CredentialsPanel
@@ -546,6 +556,29 @@ function App() {
                     </Page>
                   </>
                 )}
+                <Page id="certificates">
+                  <CertificateWorkspace
+                    software={
+                      <AdministrationPanel
+                        token={token}
+                        revision={state.revision}
+                        onChange={async () => {
+                          const next = await request("");
+                          setState(next);
+                          setSettings(next.draft);
+                          setTested(false);
+                          setSaved(true);
+                        }}
+                      />
+                    }
+                    hardware={
+                      <HardwareIdentitiesPanel
+                        token={token}
+                        profileRevision={state.activeRevision}
+                      />
+                    }
+                  />
+                </Page>
                 <Page id="identities">
                   <AdministrationPanel
                     token={token}
@@ -575,6 +608,19 @@ function App() {
             )}
             <Page id="jobs">
               <JobsPanel
+                mode="jobs"
+                token={token}
+                canSign={user?.role !== "VIEWER"}
+                admin={user?.role === "ADMIN"}
+                activeProfile={state.active}
+                capabilities={capabilities}
+                profileRevision={state.activeRevision}
+                signingFingerprint={state.signingFingerprint}
+              />
+            </Page>
+            <Page id="batch">
+              <JobsPanel
+                mode="batch"
                 token={token}
                 canSign={user?.role !== "VIEWER"}
                 admin={user?.role === "ADMIN"}
@@ -585,61 +631,69 @@ function App() {
               />
             </Page>
             <Page id="inspect">
-              <section>
-                <h2>Check your file</h2>
-                <p>
-                  Upload supported content with an embedded C2PA manifest.
-                  Cryptographic integrity and signer trust are separate results;
-                  inspect the reported validation statuses.
-                </p>
-                <label>
-                  File
-                  <input
-                    type="file"
-                    accept={capabilities
-                      .filter((c) => c.inspection)
-                      .map((c) => c.mime)
-                      .join(",")}
-                    onChange={(e) => {
-                      setFile(e.target.files?.[0] ?? null);
-                      setReport(null);
-                    }}
-                  />
-                </label>
-                <button
-                  disabled={busy || !file || !state.active}
-                  onClick={() =>
-                    run(async () => {
-                      if (!file) return;
-                      const body = new FormData();
-                      body.append("file", file);
-                      const response = await fetch("/api/v1/verification", {
-                        method: "POST",
-                        headers: { "X-Admin-Token": token },
-                        body,
-                      });
-                      if (!response.ok)
-                        throw new Error(
-                          response.status === 422
-                            ? "No readable C2PA manifest, or malformed content."
-                            : `Inspection failed (${response.status}).`,
-                        );
-                      setReport(await response.json());
-                      setMessage("Check complete. See the results below.");
-                    })
-                  }
-                >
-                  Verify file
-                </button>
-                {report !== null && (
-                  <>
-                    <InspectionTrustSummary report={report} />
-                    <details className="help-details">
-                      <summary>Technical report</summary>
-                      <pre>{JSON.stringify(report, null, 2)}</pre>
-                    </details>
-                  </>
-                )}
+              <section className="validate-workspace">
+                <div className="console-two-column">
+                  <div className="console-form">
+                    <h2>Check your file</h2>
+                    <p>Check a file’s signature and signer trust.</p>
+                    <FileDropZone
+                      files={file ? [file] : []}
+                      accept={capabilities
+                        .filter((c) => c.inspection)
+                        .map((c) => c.mime)
+                        .join(",")}
+                      disabled={busy}
+                      onChange={(files) => {
+                        setFile(files[0] ?? null);
+                        setReport(null);
+                      }}
+                    />
+                    <button
+                      disabled={busy || !file || !state.active}
+                      onClick={() =>
+                        run(async () => {
+                          if (!file) return;
+                          const body = new FormData();
+                          body.append("file", file);
+                          const response = await fetch("/api/v1/verification", {
+                            method: "POST",
+                            headers: { "X-Admin-Token": token },
+                            body,
+                          });
+                          if (!response.ok)
+                            throw new Error(
+                              response.status === 422
+                                ? "No readable C2PA manifest, or malformed content."
+                                : `Inspection failed (${response.status}).`,
+                            );
+                          setReport(await response.json());
+                          setMessage("Check complete. See the results below.");
+                        })
+                      }
+                    >
+                      Validate
+                    </button>
+                  </div>
+                  <div
+                    className="console-result"
+                    aria-label="Validation result"
+                  >
+                    {report === null && (
+                      <p className="empty-result">
+                        The file’s validation will appear here.
+                      </p>
+                    )}
+                    {report !== null && (
+                      <>
+                        <InspectionTrustSummary report={report} />
+                        <details className="help-details">
+                          <summary>Technical report</summary>
+                          <pre>{JSON.stringify(report, null, 2)}</pre>
+                        </details>
+                      </>
+                    )}
+                  </div>
+                </div>
               </section>
             </Page>
             {user?.id != null && (
