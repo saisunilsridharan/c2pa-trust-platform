@@ -275,3 +275,22 @@ Add `--public-trust` to the disposable integration command to exercise actual au
 Public revocation supplements list membership; it does not add private issuers to the official list or change private signing policies. Complete CRL refresh is manual; nonce echo and fresh status are mandatory. The configured responder must cover all issuers in the validated signer path, so use an appropriate OCSP gateway where multiple issuer services need routing. Expired issuer/CRL data fails closed even for historical content.
 
 OpenAPI now uses qualified schema names to distinguish provider records with shared simple names. Regenerate generated client types from the current `/v3/api-docs` when upgrading. Swagger tests follow request references for public trust, OCSP, webhooks and remote-agent configuration.
+
+### Workspace navigation
+
+The portal opens an enterprise workspace dashboard at `/portal/dashboard` after
+sign-in. Content signing, queued jobs, inspection, notifications, certificates,
+trust policies, configuration, administration and personal security each have
+separate URLs and role-aware sidebar entries. Breadcrumbs identify the selected
+page; browser back/forward and authenticated deep links are supported. The mobile
+menu retains access to every permitted page. Only the selected feature is mounted;
+workspace changes remount feature forms and clear previous inspection state.
+Sessions stay in memory: refreshing a deep link requires signing in again and
+then returns to the requested page. Nginx's existing SPA fallback serves these
+URLs. The dashboard reports actual active profile, enabled formats and signing
+readiness rather than fabricated activity counts.
+
+Frontend validation: `cd frontend && npm test && npm run build`. Browser acceptance
+also covers dashboard/page isolation, profile/inspection navigation, back,
+authenticated deep links, viewer restrictions and mobile layout with disposable
+mock API responses; it does not modify enrolled accounts or provider settings.

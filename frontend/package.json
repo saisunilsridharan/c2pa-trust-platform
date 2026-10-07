@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
-    "test": "node --test scripts/test-workspace-context.mjs"
+    "test": "node --test scripts/test-*.mjs"
   },
   "dependencies": {
     "react": "^19.1.1",
