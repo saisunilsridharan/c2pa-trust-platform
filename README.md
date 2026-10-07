@@ -294,3 +294,11 @@ Frontend validation: `cd frontend && npm test && npm run build`. Browser accepta
 also covers dashboard/page isolation, profile/inspection navigation, back,
 authenticated deep links, viewer restrictions and mobile layout with disposable
 mock API responses; it does not modify enrolled accounts or provider settings.
+
+The modern workspace includes consistent vector navigation icons, a collapsible
+sidebar, a redesigned provenance dashboard and shared light/dark theme tokens
+across forms, tables and configuration pages. The theme preference is retained in
+browser storage. Open page search from the toolbar or with Ctrl/Command+K; filter
+permitted pages, navigate with arrow keys and Enter, or dismiss with Escape. Search
+uses the same role-aware page list as the sidebar. The native modal traps focus
+and restores focus when dismissed. Reduced-motion preferences are respected.

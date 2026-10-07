@@ -1,3 +1,4 @@
+import { Icon, WorkspaceTools } from "./WorkspaceTools";
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { allowedPages, pageFromPath, type PortalAccount } from "./navigation";
 const RouteContext = createContext("dashboard");
@@ -31,7 +32,8 @@ export function PortalShell({
   children: React.ReactNode;
 }) {
   const [route, setRoute] = useState(() => pageFromPath(location.pathname)),
-    [menu, setMenu] = useState(false);
+    [menu, setMenu] = useState(false),
+    [collapsed, setCollapsed] = useState(false);
   const enabled =
     ready && !!user && !user.passwordChangeRequired && user.workspaceId > 0;
   const visible = allowedPages(user),
@@ -64,10 +66,11 @@ export function PortalShell({
       ? `${current?.[2] ?? "Page unavailable"} · Trust Portal`
       : "Sign in · Trust Portal";
   }, [enabled, current]);
-  function link(id: string, label: string) {
+  function link(id: string, label: string, icon = false) {
     return (
       <a
         aria-current={route === id ? "page" : undefined}
+        title={collapsed && icon ? label : undefined}
         href={"/portal/" + id}
         onClick={(e) => {
           if (
@@ -82,13 +85,19 @@ export function PortalShell({
           }
         }}
       >
-        {label}
+        {icon && <Icon name={id} />}
+        <span className={icon ? "nav-text" : undefined}>{label}</span>
       </a>
     );
   }
   return (
     <RouteContext.Provider value={enabled && current ? route : ""}>
-      <div className={"shell " + (!enabled ? "auth-shell" : "")}>
+      <div
+        className={
+          "shell " +
+          (!enabled ? "auth-shell" : collapsed ? "sidebar-collapsed" : "")
+        }
+      >
         {enabled && (
           <>
             <button
@@ -111,7 +120,9 @@ export function PortalShell({
               className={menu ? "sidebar open" : "sidebar"}
             >
               <div className="brand">
-                <span className="brand-mark">◈</span>
+                <span className="brand-mark">
+                  <Icon name="shield" size={22} />
+                </span>
                 <span>
                   Trust Portal<small>CONTENT AUTHENTICITY</small>
                 </span>
@@ -133,7 +144,7 @@ export function PortalShell({
                           }
                           aria-current={route === p[0] ? "page" : undefined}
                         >
-                          {link(p[0], p[2])}
+                          {link(p[0], p[2], true)}
                         </div>
                       ))}
                   </div>
@@ -157,6 +168,12 @@ export function PortalShell({
                 <strong>{active?.organizationName || "Workspace setup"}</strong>
                 <span className="environment-tag">C2PA PORTAL</span>
               </div>
+              <WorkspaceTools
+                pages={visible}
+                navigate={navigate}
+                collapsed={collapsed}
+                onCollapse={() => setCollapsed(!collapsed)}
+              />
               <div className="account-menu">
                 <span className="avatar">
                   {user.username.slice(0, 1).toUpperCase()}
@@ -189,9 +206,11 @@ export function PortalShell({
                     <h1>{current?.[2] ?? "Page unavailable"}</h1>
                     <p>
                       {current
-                        ? "Manage " +
-                          current[2].toLowerCase() +
-                          " for your workspace."
+                        ? route === "dashboard"
+                          ? "Your workspace for trusted content."
+                          : "Manage " +
+                            current[2].toLowerCase() +
+                            " for your workspace."
                         : "This page is unavailable for your role or does not exist."}
                     </p>
                   </div>
@@ -202,7 +221,9 @@ export function PortalShell({
               </>
             ) : (
               <header className="login-heading">
-                <div className="brand-mark">◈</div>
+                <div className="brand-mark">
+                  <Icon name="shield" size={26} />
+                </div>
                 <h1>Welcome to Trust Portal</h1>
                 <p>Sign in to manage content authenticity and provenance.</p>
               </header>
@@ -216,6 +237,45 @@ export function PortalShell({
               )}
               {enabled && route === "dashboard" && (
                 <>
+                  <div className="dashboard-hero">
+                    <div className="hero-copy">
+                      <span className="eyebrow">
+                        <Icon name="shield" size={14} /> CONTENT AUTHENTICITY,
+                        CONNECTED
+                      </span>
+                      <h2>
+                        Create with confidence.
+                        <br />
+                        Publish with provenance.
+                      </h2>
+                      <p>
+                        Bring your content, credentials and trust policies
+                        together in one secure workspace.
+                      </p>
+                      <div className="hero-links">
+                        {link(
+                          user.role === "VIEWER" ? "inspect" : "sign",
+                          user.role === "VIEWER"
+                            ? "Verify content →"
+                            : "Sign content →",
+                        )}
+                        {link("jobs", "View signing jobs")}
+                      </div>
+                    </div>
+                    <div className="provenance-visual" aria-hidden="true">
+                      <div className="orbit orbit-one" />
+                      <div className="orbit orbit-two" />
+                      <div className="provenance-core">
+                        <Icon name="shield" size={52} />
+                        <span>C2PA</span>
+                      </div>
+                      <span className="orbit-label label-one">Content</span>
+                      <span className="orbit-label label-two">Identity</span>
+                      <span className="orbit-label label-three">
+                        Provenance
+                      </span>
+                    </div>
+                  </div>
                   <div className="metric-grid">
                     <article className="metric">
                       <span>Signing readiness</span>
@@ -253,11 +313,7 @@ export function PortalShell({
                         .map((p) => (
                           <article key={p[0]}>
                             <span className="action-symbol">
-                              {p[0] === "sign"
-                                ? "✎"
-                                : p[0] === "jobs"
-                                  ? "≡"
-                                  : "◎"}
+                              <Icon name={p[0]} size={22} />
                             </span>
                             <h3>{p[2]}</h3>
                             {link(p[0], "Open workspace →")}
